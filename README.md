@@ -50,7 +50,7 @@ the rewrite attempt being requested:
 | `data.attributes.original-text` | Yes | The text sent to the model. The caller is responsible for supplying suitable plain text within the configured model limits. |
 | `data.attributes.related-subject` | Yes | URI of the concrete resource that owns the field, such as a procedure or rule. |
 | `data.attributes.related-field` | Yes | Predicate/name of the field on that subject, such as `dct:title`. |
-| `data.relationships` | No as an object | The relationship object may be omitted; missing values will fail during request processing. |
+| `data.relationships` | `public-service` is required for a successful request | The rewrite cannot proceed without `data.relationships.public-service`. Send the `public-service` relationship shown below. |
 
 The `related-subject` and `related-field` pair identifies the exact field.
 `related-field` alone is not enough because different nested resources can
