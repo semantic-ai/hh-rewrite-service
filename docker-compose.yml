@@ -18,10 +18,10 @@ services:
       ALLOW_MU_AUTH_SUDO: "true"
       JOB_GRAPH: http://mu.semte.ch/graphs/public
       LOG_LEVEL: INFO
-      LLM__API_KEY: ${MISTRAL_API_KEY}
+      LLM__API_KEY: ${OPENAI_API_KEY}
     volumes:
       - ./:/app
-      - ./config.json:/config/config.json:ro
+      - ./config-openai.json:/config/config.json:ro
       - ./docker-compose.yml:/tmp/docker-compose.yaml:ro
     ports:
       - "8080:80"

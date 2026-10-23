@@ -9,6 +9,7 @@ from src.rewrite import (
     LangChainLlmClient,
     RewriteValidationError,
     assemble_prompt,
+    extract_usage,
     rewrite_text,
     validate_output,
 )
@@ -67,6 +68,22 @@ def test_validate_output_rejects_empty_refusal_and_preamble() -> None:
         validate_output("Hier is de herschreven tekst: Vul het formulier in.")
 
 
+def test_extract_usage_reads_langchain_metadata() -> None:
+    """Read token counts from the raw LangChain response when available."""
+
+    class RawResponse:
+        usage_metadata = {"input_tokens": 12, "output_tokens": 7}
+
+    usage = extract_usage(
+        {"raw": RawResponse(), "parsed": {"generated_text": "Tekst"}},
+        1.25,
+    )
+
+    assert usage.tokens_in == 12
+    assert usage.tokens_out == 7
+    assert usage.duration == 1.25
+
+
 # ---------------------------------------------------------------------------
 # Retry workflow
 # ---------------------------------------------------------------------------
@@ -96,4 +113,8 @@ def test_rewrite_text_retries_connection_failure() -> None:
         )
     )
 
-    assert result.generated_text == "Vul het formulier in."
+    rewrite, usage = result
+
+    assert rewrite.generated_text == "Vul het formulier in."
+    assert usage.tokens_in == 0
+    assert usage.tokens_out == 0

@@ -146,6 +146,8 @@ def test_post_rewrite_returns_attempt_and_activity(configured_client):
     assert llm.calls == 1
     assert store.guideline_reads == [ServiceConfig().rewrite.guideline_uri]
     assert store.writes[0]["guideline_uri"] == ServiceConfig().rewrite.guideline_uri
+    assert store.writes[0]["model_uri"].endswith("#gpt-6-luna")
+    assert store.writes[0]["endpoint"] == "openai"
     assert "Gebruik actieve zinnen." in llm.messages[0][1]["content"]
 
 

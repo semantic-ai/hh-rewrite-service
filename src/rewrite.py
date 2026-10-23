@@ -43,6 +43,14 @@ class RewriteResult(BaseModel):
     generated_text: str
 
 
+class RewriteUsage(BaseModel):
+    """Token and timing metadata for one provider invocation."""
+
+    tokens_in: int = 0
+    tokens_out: int = 0
+    duration: float = 0.0
+
+
 _REFUSAL_PATTERN = re.compile(
     r"^(?:i(?:'|’)m sorry|sorry|ik kan deze tekst niet|ik kan niet helpen)", re.IGNORECASE
 )
@@ -216,6 +224,24 @@ def log_response(response: Any, processing_time: float) -> None:
                 )
 
 
+def extract_usage(response: Any, processing_time: float) -> RewriteUsage:
+    """Extract token usage from a LangChain response when available."""
+
+    tokens_in = 0
+    tokens_out = 0
+    if isinstance(response, dict):
+        raw = response.get("raw")
+        usage = getattr(raw, "usage_metadata", None)
+        if isinstance(usage, dict):
+            tokens_in = usage.get("input_tokens", 0) or 0
+            tokens_out = usage.get("output_tokens", 0) or 0
+    return RewriteUsage(
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        duration=processing_time,
+    )
+
+
 async def rewrite_text(
     config: ServiceConfig,
     llm: Any,
@@ -224,7 +250,7 @@ async def rewrite_text(
     address_form: str,
     guideline_text: str,
     text: str,
-) -> RewriteResult:
+) -> tuple[RewriteResult, RewriteUsage]:
     """Run one rewrite with retry handling."""
 
     messages = assemble_prompt(
@@ -250,6 +276,7 @@ async def rewrite_text(
 
             # Log the response for debugging purposes before validation.
             log_response(response, processing_time)
+            usage = extract_usage(response, processing_time)
 
             if isinstance(response, dict) and "parsed" in response:
                 if response["parsing_error"]:
@@ -257,9 +284,9 @@ async def rewrite_text(
                         "Model output parsing failed"
                     )
 
-                return validate_output(response["parsed"])
+                return validate_output(response["parsed"]), usage
 
-            return validate_output(_decode_response(response))
+            return validate_output(_decode_response(response)), usage
 
         except RewriteValidationError:
             raise

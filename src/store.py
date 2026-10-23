@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from escape_helpers import sparql_escape, sparql_escape_uri
+from escape_helpers import sparql_escape, sparql_escape_float, sparql_escape_int, sparql_escape_uri
 from helpers import query as template_query, update as template_update
 
 
@@ -152,6 +152,11 @@ class Store:
         guideline_uri: str,
         agent_uri: str,
         based_on_uri: str | None = None,
+        model_uri: str | None = None,
+        endpoint: str | None = None,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        duration: float | None = None,
     ) -> None:
         """Write one attempt and its provenance records in a single update."""
 
@@ -185,8 +190,28 @@ class Store:
             activity_lines[-1] = activity_lines[-1][:-2] + " ;"
             activity_lines.append(f"    <{PROV}used> {sparql_escape_uri(based_on_uri)} .")
 
+        if model_uri:
+            ai_call_uri = _uuid_uri("ai-call")
+            ai_call_lines = [
+                f"{sparql_escape_uri(activity_uri)} <{EXT}performedAICall> {sparql_escape_uri(ai_call_uri)} .",
+                f"{sparql_escape_uri(ai_call_uri)} a <{EXT}AICall> ;",
+                f"    <{MU}uuid> {sparql_escape(ai_call_uri.rsplit('/', 1)[-1])} ;",
+                f"    <{EXT}endpoint> {sparql_escape(endpoint or '')} ;",
+                f"    <{EXT}aiModel> {sparql_escape_uri(model_uri)} ;",
+                f"    <{EXT}tokenIn> {sparql_escape_int(tokens_in)} ;",
+                f"    <{EXT}tokenOut> {sparql_escape_int(tokens_out)}",
+            ]
+            if duration is not None:
+                ai_call_lines[-1] += " ;"
+                ai_call_lines.append(f"    <{EXT}duration> {sparql_escape_float(duration)}")
+            ai_call_lines[-1] += " ."
+        else:
+            ai_call_lines = []
+
         domain = "\n".join(attempt_lines)
         provenance = "\n".join(activity_lines)
+        if ai_call_lines:
+            provenance += "\n" + "\n".join(ai_call_lines)
         blocks = [f"GRAPH {sparql_escape_uri(self.domain_graph)} {{\n{domain}\n}}"]
         # The service supports either one shared graph or separate domain and provenance graphs.
         if self.provenance_graph == self.domain_graph:

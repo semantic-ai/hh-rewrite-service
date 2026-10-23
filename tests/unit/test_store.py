@@ -85,3 +85,42 @@ def test_read_guideline_queries_typed_resource(monkeypatch) -> None:
     assert len(queries) == 1
     assert "<http://mu.semte.ch/vocabularies/ext/Guideline>" in queries[0]
     assert "<http://mu.semte.ch/vocabularies/ext/guidelineText>" in queries[0]
+
+
+def test_write_attempt_links_aicall_to_activity(monkeypatch) -> None:
+    """Persist model usage as one AICall linked from the activity."""
+
+    updates = []
+    monkeypatch.setattr(store_module, "template_update", updates.append)
+    monkeypatch.setattr(store_module, "sparql_escape", sparql_escape)
+    monkeypatch.setattr(store_module, "sparql_escape_float", lambda value: str(value))
+    monkeypatch.setattr(store_module, "sparql_escape_int", lambda value: str(value))
+    monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
+    store = Store(domain_graph="http://example.org/domain", provenance_graph="http://example.org/provenance")
+
+    store.write_attempt(
+        attempt_uri="http://example.org/attempt/1",
+        field_generation_uri="http://example.org/generation/1",
+        attempt_number=1,
+        original_text="Origineel",
+        generated_text="Nieuwe tekst",
+        activity_uri="http://example.org/activity/1",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
+        address_form="nl-be-x-formal",
+        guideline_uri="http://example.org/guideline/1",
+        agent_uri="http://example.org/agent/1",
+        model_uri="http://data.lblod.info/ontology/airo#mistral-small-2603",
+        endpoint="https://api.mistral.ai/v1",
+        tokens_in=12,
+        tokens_out=7,
+        duration=1.25,
+    )
+
+    assert len(updates) == 1
+    assert "performedAICall" in updates[0]
+    assert "AICall" in updates[0]
+    assert "aiModel" in updates[0]
+    assert "tokenIn" in updates[0]
+    assert "tokenOut" in updates[0]
+    assert "duration" in updates[0]

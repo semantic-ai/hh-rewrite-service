@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from decide_ai_service_base.ai_logging import model_name_to_uri
 from decide_ai_service_base.util import (
     app,
     get_agent_uri,
@@ -276,7 +277,7 @@ async def create_rewrite(
 
         # Only the model invocation is provider-dependent; persistence remains deterministic.
         started_at = datetime.now(timezone.utc)
-        result = await rewrite_text(
+        result, usage = await rewrite_text(
             config,
             llm,
             field=related_field,
@@ -303,6 +304,11 @@ async def create_rewrite(
             guideline_uri=guideline_uri,
             agent_uri=agent_uri,
             based_on_uri=based_on_uri,
+            model_uri=model_name_to_uri(config.llm.model_name),
+            endpoint=config.llm.base_url or config.llm.provider,
+            tokens_in=usage.tokens_in,
+            tokens_out=usage.tokens_out,
+            duration=usage.duration,
         )
         
         based_on_relationship = (
