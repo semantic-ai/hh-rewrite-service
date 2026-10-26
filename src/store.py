@@ -24,6 +24,7 @@ MU = "http://mu.semte.ch/vocabularies/core/"
 PROV = "http://www.w3.org/ns/prov#"
 EXT = "http://mu.semte.ch/vocabularies/ext/"
 DCT = "http://purl.org/dc/terms/"
+TASK = "http://redpencil.data.gift/vocabularies/tasks/"
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +170,7 @@ class Store:
         # Provenance records capture timing, guideline and agent metadata.
         activity_lines = [
             f"{sparql_escape_uri(activity_uri)} a <{PROV}Activity> ;",
+            f"    a <{TASK}Task> ;",
             f"    <{MU}uuid> {sparql_escape(activity_uri.rsplit('/', 1)[-1])} ;",
             f"    <{PROV}startedAtTime> {sparql_escape(started_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}endedAtTime> {sparql_escape(ended_at.astimezone(timezone.utc))} ;",
