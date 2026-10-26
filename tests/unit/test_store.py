@@ -36,7 +36,7 @@ def test_write_attempt_uses_one_insert_and_preserves_literals(monkeypatch) -> No
     monkeypatch.setattr(store_module, "template_update", updates.append)
     monkeypatch.setattr(store_module, "sparql_escape", sparql_escape)
     monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
-    store = Store(domain_graph="http://example.org/domain", provenance_graph="http://example.org/provenance")
+    store = Store()
 
     store.write_attempt(
         attempt_uri="http://example.org/attempt/1",
@@ -54,6 +54,8 @@ def test_write_attempt_uses_one_insert_and_preserves_literals(monkeypatch) -> No
 
     assert len(updates) == 1
     assert updates[0].startswith("INSERT DATA")
+    assert "a <http://www.w3.org/ns/prov#Activity>" in updates[0]
+    assert "a <http://redpencil.data.gift/vocabularies/tasks/Task>" in updates[0]
     assert 'Origineel \\\"tekst\\\" \\\\\\"' in updates[0]
     assert "hasConfig" not in updates[0]
     assert "configHash" not in updates[0]
@@ -79,12 +81,36 @@ def test_read_guideline_queries_typed_resource(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
-    store = Store(domain_graph="http://example.org/domain", provenance_graph="http://example.org/provenance")
+    store = Store()
 
     assert store.read_guideline("http://example.org/guideline/1") == "Gebruik actieve zinnen."
     assert len(queries) == 1
     assert "<http://mu.semte.ch/vocabularies/ext/Guideline>" in queries[0]
     assert "<http://mu.semte.ch/vocabularies/ext/guidelineText>" in queries[0]
+
+
+def test_resolve_by_uuid_filters_rdf_type(monkeypatch) -> None:
+    """Resolve only a resource with the requested RDF type."""
+
+    queries = []
+    monkeypatch.setattr(
+        store_module,
+        "template_query",
+        lambda query: queries.append(query)
+        or {"results": {"bindings": [{"resource": {"value": "http://example.org/service/1"}}]}},
+    )
+    monkeypatch.setattr(store_module, "sparql_escape", sparql_escape)
+    monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
+    store = Store()
+
+    assert (
+        store.resolve_by_uuid(
+            "123",
+            "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService",
+        )
+        == "http://example.org/service/1"
+    )
+    assert " a <https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService>" in queries[0]
 
 
 def test_write_attempt_links_aicall_to_activity(monkeypatch) -> None:
@@ -96,7 +122,7 @@ def test_write_attempt_links_aicall_to_activity(monkeypatch) -> None:
     monkeypatch.setattr(store_module, "sparql_escape_float", lambda value: str(value))
     monkeypatch.setattr(store_module, "sparql_escape_int", lambda value: str(value))
     monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
-    store = Store(domain_graph="http://example.org/domain", provenance_graph="http://example.org/provenance")
+    store = Store()
 
     store.write_attempt(
         attempt_uri="http://example.org/attempt/1",

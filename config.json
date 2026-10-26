@@ -12,10 +12,6 @@
     "max_attempts": 20,
     "retries": 1
   },
-  "graphs": {
-    "domain": "http://mu.semte.ch/graphs/public",
-    "provenance": "http://mu.semte.ch/graphs/public"
-  },
   "rewrite": {
     "guideline_uri": "https://example.org/guidelines/hh/v3",
     "prompt": {

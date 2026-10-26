@@ -8,9 +8,86 @@ It is meant to support iterative rewriting of the same field: each field keeps a
 
 ## Configuration
 
-`config.json` contains the provider, model, limits, graphs and rewrite prompt. Nested settings can be overridden with double-underscore environment variables, for example `LLM__PROVIDER=openai`, `LLM__API_KEY=...` and `LIMITS__RETRIES=2`.
+`config.json` contains the provider, model, operational limits and rewrite
+prompt. Nested settings can be overridden with double-underscore environment
+variables, for example `LLM__PROVIDER=openai`, `LLM__API_KEY=...`,
+`LIMITS__RETRIES=2`.
 
-The configured guideline URI is resolved in the domain graph on every rewrite request. The resource must be typed `ext:Guideline` and provide `mu:uuid`, `dct:title` and `ext:guidelineText`. 
+The configured guideline URI is resolved on every rewrite request through the
+authorized SPARQL endpoint. The resource must be typed `ext:Guideline` and
+provide `mu:uuid`, `dct:title` and `ext:guidelineText`.
+
+## Data model
+
+The service stores one stable field-generation resource and one immutable
+generation-attempt resource for every rewrite. The provenance resource is
+exposed as a task-facing `generation-tasks` resource, while its RDF node is
+typed as both `prov:Activity` and `tasks:Task`. It records the model
+invocation and links the attempt to the selected guideline and agent. An
+`ext:AICall` resource records the provider call details when model metadata is
+available.
+
+The prefixes currently used by the writer are:
+
+| Prefix | Namespace | Use |
+| --- | --- | --- |
+| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | Field-generation and attempt terms. This use is provisional: these terms extend the published LPDC model and the namespace owner still needs to be confirmed. |
+| `mu` | `http://mu.semte.ch/vocabularies/core/` | Shared UUID values. |
+| `prov` | `http://www.w3.org/ns/prov#` | Activity and provenance relationships. |
+| `tasks` | `http://redpencil.data.gift/vocabularies/tasks/` | Task type used alongside `prov:Activity` for the task-facing provenance resource. |
+| `ext` | `http://mu.semte.ch/vocabularies/ext/` | Guideline and AI-call metadata owned by the shared service conventions. |
+| `dct` | `http://purl.org/dc/terms/` | Language metadata. |
+
+The main resources and predicates are:
+
+| Resource | Predicates written by this service |
+| --- | --- |
+| `lpdcExt:FieldGeneration` | `lpdcExt:relatedSubject`, `lpdcExt:relatedField`, `lpdcExt:fieldGenerationInstance`, `mu:uuid` |
+| `lpdcExt:GenerationAttempt` | `lpdcExt:generationAttempt`, `lpdcExt:attemptNumber`, `lpdcExt:originalText`, `lpdcExt:generatedText`, `prov:wasGeneratedBy`, `mu:uuid` |
+| `prov:Activity` + `tasks:Task` | `prov:startedAtTime`, `prov:endedAtTime`, `prov:generated`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
+| `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the task with `ext:performedAICall` |
+
+The guideline is read as an existing `ext:Guideline` resource. Its required
+properties are `mu:uuid`, `dct:title` and `ext:guidelineText`. The service does
+not create or update guideline resources.
+
+For example, one stored attempt has this shape:
+
+```turtle
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix ext: <http://mu.semte.ch/vocabularies/ext/> .
+@prefix lpdcExt: <https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#> .
+@prefix mu: <http://mu.semte.ch/vocabularies/core/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix tasks: <http://redpencil.data.gift/vocabularies/tasks/> .
+
+<http://data.lblod.info/id/generation-attempts/example>
+    a lpdcExt:GenerationAttempt ;
+    lpdcExt:generationAttempt <http://data.lblod.info/id/field-generations/example> ;
+    lpdcExt:attemptNumber 1 ;
+    lpdcExt:originalText "De aanvrager dient het formulier in te vullen." ;
+    lpdcExt:generatedText "Vul het formulier in." ;
+    prov:wasGeneratedBy <http://data.lblod.info/id/generation-tasks/example> .
+
+<http://data.lblod.info/id/generation-tasks/example>
+    a prov:Activity ;
+    a tasks:Task ;
+    prov:generated <http://data.lblod.info/id/generation-attempts/example> ;
+    prov:wasAssociatedWith <http://lblod.data.gift/id/components/hh-rewrite/v1.0.0> ;
+    prov:used <https://example.org/guidelines/hh/v3> ;
+    ext:addressForm "nl-be-x-formal" ;
+    dct:language "nl" ;
+    ext:performedAICall <http://data.lblod.info/id/ai-call/example> .
+
+<http://data.lblod.info/id/ai-call/example>
+  a ext:AICall ;
+  mu:uuid "example" ;
+  ext:endpoint "https://api.mistral.ai/v1" ;
+  ext:aiModel <http://data.lblod.info/ontology/airo#mistral-small-2603> ;
+  ext:tokenIn 184 ;
+  ext:tokenOut 42 ;
+  ext:duration 3.75 .
+```
 
 
 
@@ -32,7 +109,6 @@ The configured guideline URI is resolved in the domain graph on every rewrite re
 				"data": {"type": "public-services", "id": "123"}
 			},
 			"field-generation": {"data": null},
-      "based-on": {"data": null},
       "guideline": {"data": null}
 		}
 	}
@@ -47,7 +123,7 @@ the rewrite attempt being requested:
 | Part | Required? | Meaning |
 | --- | --- | --- |
 | `data.type` | Yes | Must be `generation-attempts`. This is the resource type that the service will create. |
-| `data.attributes.original-text` | Yes | The text sent to the model. The caller is responsible for supplying suitable plain text within the configured model limits. |
+| `data.attributes.original-text` | Yes | Plain text sent to the model. Empty text and markup are rejected, and the service enforces `limits.max_input_length`. |
 | `data.attributes.related-subject` | Yes | URI of the concrete resource that owns the field, such as a procedure or rule. |
 | `data.attributes.related-field` | Yes | Predicate/name of the field on that subject, such as `dct:title`. |
 | `data.relationships` | `public-service` is required for a successful request | The rewrite cannot proceed without `data.relationships.public-service`. Send the `public-service` relationship shown below. |
@@ -62,13 +138,13 @@ The caller normally does **not** need to send a `guideline` relationship. The
 service selects and fetches one guideline for the request:
 
 1. `rewrite.guideline_uri` in [config.json](./config.json) identifies the
-   guideline version, for example `https://example.org/guidelines/hh/v1`.
+  guideline version, for example `https://example.org/guidelines/hh/v3`.
 2. `data.relationships.guideline.data`, when present, identifies the guideline
   resource for that request. Its `id` must be an absolute URI.
-3. The service reads the matching `ext:Guideline` resource from the domain
-  graph and places its `ext:guidelineText` in the prompt.
+3. The service reads the matching `ext:Guideline` resource through
+  mu-authorization and places its `ext:guidelineText` in the prompt.
 4. The selected URI is stored as `prov:used` provenance and returned as the
-  activity's `guideline` relationship.
+  task's `guideline` relationship.
 
 Guidelines are assumed to be present in the triplestore. A missing or empty
 resource returns HTTP 404 before a model call or persistence write.
@@ -83,8 +159,7 @@ The relationships do not all need to be filled in:
 | --- | --- | --- | --- |
 | `public-service` | **Yes** | `{ "data": { "type": "public-services", "id": "123" } }` | Existing LPDC product/service instance that provides the context for the rewrite. The service reads settings such as its Dutch language variant from this resource. |
 | `field-generation` | No | Omit it, or send `{ "data": null }`. To reuse a known generation, send `{ "data": { "type": "field-generations", "id": "..." } }`. | Stable parent grouping all rewrite attempts for the same field. If omitted or null, the service finds or creates it from `public-service`, `related-subject` and `related-field`. |
-| `based-on` | No | Omit it, or send `{ "data": null }`. For a follow-up rewrite, send a `generation-attempts` identifier. | Previous attempt whose text is being refined. Null means this is the first attempt or a new branch from the supplied `original-text`. The referenced attempt must belong to the same field generation. |
-| `guideline` | No | Omit it, or send `{ "data": null }`. To select a request-specific guideline, send `{ "data": { "type": "guidelines", "id": "https://example.org/guidelines/hh/v1" } }`. | Versioned `ext:Guideline` resource used to build the prompt. If omitted or null, the service uses `rewrite.guideline_uri`. The identifier must be an absolute URI. |
+| `guideline` | No | Omit it, or send `{ "data": null }`. To select a request-specific guideline, send `{ "data": { "type": "guidelines", "id": "https://example.org/guidelines/hh/v3" } }`. | Versioned `ext:Guideline` resource used to build the prompt. If omitted or null, the service uses `rewrite.guideline_uri`. The identifier must be an absolute URI. |
 
 An identifier can be a short JSON:API id such as `"123"` or an absolute
 resource URI. Relationship types are interpreted by the caller and should
@@ -109,7 +184,6 @@ The following is equivalent and makes the optional relationships explicit:
     "data": {"type": "public-services", "id": "123"}
   },
   "field-generation": {"data": null},
-  "based-on": {"data": null},
   "guideline": {"data": null}
 }
 ```
@@ -124,16 +198,13 @@ For a subsequent rewrite using existing resources:
   "field-generation": {
     "data": {"type": "field-generations", "id": "456"}
   },
-  "based-on": {
-    "data": {"type": "generation-attempts", "id": "789"}
-  }
 }
 ```
 
 The supplied `field-generation` must identify the same public service,
-related subject and related field as the request. The `based-on` attempt must
-belong to that same field generation. The service calculates the next
-`attempt-number`; clients do not send it.
+related subject and related field as the request. The service calculates the
+next `attempt-number`; clients do not send it. Attempts within a field
+generation are ordered by that number and do not branch.
 
 ### Resource hierarchy
 
@@ -186,7 +257,7 @@ attempt (`original-text`), the model suggestion (`generated-text`) and,
 where applicable, the user-selected or corrected value (`final-text`).
 `field-generation` and `generation-attempt` are persistence resources exposed
 by mu-cl-resources; this service owns the rewrite action and writes the
-resulting attempt and provenance activity.
+resulting attempt and provenance task.
 
 When the container is running, open [http://localhost:8080/docs](http://localhost:8080/docs),
 select `POST /hh-rewrites`, click **Try it out**, and use the generated JSON:API example.
@@ -194,16 +265,16 @@ The endpoint has one request-body parameter rather than separate Swagger fields 
 JSON:API sends all attributes and relationships in one document.
 
 The request reaches the model and triplestore, so configure `LLM__API_KEY` and make
-sure the development triplestore is running before using it. The development
-compose stack configures both `MU_SPARQL_ENDPOINT` and
-`MU_SPARQL_UPDATEPOINT` to `http://triplestore:8890/sparql`; keep these
-variables set when deploying with the mu-python-template runtime.
+sure mu-authorization and the development triplestore are running before using
+it. The development compose stack configures both `MU_SPARQL_ENDPOINT` and
+`MU_SPARQL_UPDATEPOINT` to `http://database:8890/sparql`; keep these variables
+set when deploying with the mu-python-template runtime.
 
 
 At startup, the service waits for the triplestore and registers the versioned
 rewrite agent through `decide-ai-service-base`. Agent configuration hashing and
 agent reuse are handled by that package; rewrite requests only reference the
-registered agent URI in their provenance activity.
+registered agent URI in their provenance task.
 
 ## Compose
 

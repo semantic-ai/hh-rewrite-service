@@ -12,11 +12,9 @@ services:
       CONFIG_PATH: /config/config.json
       COMPOSE_FILE: /tmp/docker-compose.yaml
       COMPOSE_SERVICE: rewrite-service
-      AI_GRAPH: http://mu.semte.ch/graphs/public
-      MU_SPARQL_ENDPOINT: http://triplestore:8890/sparql
-      MU_SPARQL_UPDATEPOINT: http://triplestore:8890/sparql
       ALLOW_MU_AUTH_SUDO: "true"
-      JOB_GRAPH: http://mu.semte.ch/graphs/public
+      MU_SPARQL_UPDATEPOINT: http://database:8890/sparql
+      MU_SPARQL_ENDPOINT: http://database:8890/sparql
       LOG_LEVEL: INFO
       LLM__API_KEY: ${OPENAI_API_KEY}
     volumes:
@@ -25,6 +23,12 @@ services:
       - ./docker-compose.yml:/tmp/docker-compose.yaml:ro
     ports:
       - "8080:80"
+  database:
+    image: semtech/mu-authorization:0.6.0-beta.5
+    environment:
+      MU_SPARQL_ENDPOINT: http://triplestore:8890/sparql
+    volumes:
+      - ./config/authorization:/config:ro
   triplestore:
     image: redpencil/virtuoso:1.4.0
     environment:

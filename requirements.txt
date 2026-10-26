@@ -4,5 +4,9 @@ langchain-openai>=0.3,<1
 langchain-ollama>=0.2,<1
 langchain-mistralai>=0.2,<1
 pydantic>=2,<3
+rdflib>=7,<8
+SPARQLWrapper>=2,<3
+deprecated>=1.2,<2
+starlette-context>=0.3,<1
 debugpy>=1.8,<2
 https://github.com/semantic-ai/decide-ai-service-base/releases/download/v0.3.4/decide_ai_service_base-0.3.4-py3-none-any.whl

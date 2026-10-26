@@ -50,7 +50,6 @@ class RewriteRelationships(BaseModel):
     field_generation: Relationship = Field(
         default_factory=Relationship, alias="field-generation"
     )
-    based_on: Relationship = Field(default_factory=Relationship, alias="based-on")
     guideline: Relationship = Field(default_factory=Relationship, alias="guideline")
 
 
@@ -84,6 +83,7 @@ class ActivityAttributes(BaseModel):
     started_at: str = Field(alias="started-at")
     ended_at: str = Field(alias="ended-at")
     address_form: str = Field(alias="address-form")
+    model: str
     language: str
     status: str
 
@@ -110,7 +110,7 @@ class Resource(BaseModel):
 
 
 class RewriteResponse(BaseModel):
-    """Top-level response containing an attempt and its activity."""
+    """Top-level response containing an attempt and its provenance task."""
 
     data: Resource
     included: list[Resource]

@@ -8,6 +8,7 @@ mapping, dependency adapters and endpoint orchestration.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,8 @@ from decide_ai_service_base.util import (
 
 from src.config import ServiceConfig, get_config
 from src.rewrite import (
+    RewriteProviderError,
+    RewriteValidationError,
     make_llm,
     rewrite_text,
 )
@@ -32,8 +35,10 @@ from src.schema import (
     ActivityAttributes,
     AttemptAttributes,
     Resource,
+    RewriteRequest,
     RewriteResponse,
 )
+from pydantic import ValidationError
 from src.store import Store
 
 
@@ -46,6 +51,12 @@ router = APIRouter()
 AGENT_URI = "http://lblod.data.gift/id/components/hh-rewrite/v1.0.0"
 
 JSON_API_MEDIA_TYPE = "application/vnd.api+json"
+
+RESOURCE_RDF_TYPES = {
+    "public_service": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService",
+    "field_generation": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration",
+}
+
 RELATIONSHIP_SCHEMA = {
     "type": "object",
     "properties": {
@@ -101,7 +112,6 @@ REQUEST_BODY_SCHEMA = {
                     "properties": {
                         "public-service": RELATIONSHIP_SCHEMA,
                         "field-generation": RELATIONSHIP_SCHEMA,
-                        "based-on": RELATIONSHIP_SCHEMA,
                         "guideline": RELATIONSHIP_SCHEMA,
                     },
                 },
@@ -129,6 +139,25 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _error(status_code: int, code: str, detail: str) -> JSONResponse:
+    """Return one JSON:API error response."""
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "errors": [
+                {
+                    "status": str(status_code),
+                    "code": code,
+                    "title": code.replace("_", " ").title(),
+                    "detail": detail,
+                }
+            ]
+        },
+        media_type=JSON_API_MEDIA_TYPE,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Template-provided service dependencies
 # ---------------------------------------------------------------------------
@@ -140,13 +169,10 @@ def get_llm(config: ServiceConfig = Depends(get_config)) -> Any:
     return make_llm(config)
 
 
-def get_store(config: ServiceConfig = Depends(get_config)) -> Store:
+def get_store() -> Store:
     """FastAPI dependency that builds the SPARQL store."""
 
-    return Store(
-        domain_graph=config.graphs.domain,
-        provenance_graph=config.graphs.provenance,
-    )
+    return Store()
 
 
 def get_agent() -> str:
@@ -185,7 +211,6 @@ def get_agent() -> str:
                                     }
                                 },
                                 "field-generation": {"data": None},
-                                "based-on": {"data": None},
                                 "guideline": {"data": None},
                             },
                         }
@@ -205,61 +230,68 @@ async def create_rewrite(
     """Run one rewrite, persist it and return the generated attempt."""
 
     try:
-        data = (await request.json())["data"]
-        attributes = data["attributes"]
-        relationships = data.get("relationships", {})
-        original_text = attributes["original-text"]
-        related_subject = attributes["related-subject"]
-        related_field = attributes["related-field"]
+        
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != JSON_API_MEDIA_TYPE:
+            return _error(415, "unsupported_media_type", "Content-Type must be application/vnd.api+json")
+ 
+        try:
+            payload = RewriteRequest.model_validate(await request.json())
+        except (ValueError, ValidationError):
+            logger.debug("Invalid rewrite request")
+            return _error(400, "invalid_request", "Request body is not valid JSON:API")
 
-        def resource_uri(name: str, resource_type: str) -> str | None:
-            relationship = relationships.get(name, {}).get("data")
+        if payload.data.type != "generation-attempts":
+            return _error(400, "invalid_request", "data.type must be generation-attempts")
+
+        attributes = payload.data.attributes
+        relationships = payload.data.relationships
+        original_text = attributes.original_text
+        related_subject = attributes.related_subject
+        related_field = attributes.related_field
+
+        if not original_text.strip():
+            return _error(422, "empty_text", "original-text must not be empty")
+        if len(original_text) > config.limits.max_input_length:
+            return _error(413, "input_too_large", "original-text exceeds the configured maximum length")
+
+        public_service_relationship = relationships.public_service.data
+        if public_service_relationship is None:
+            return _error(422, "public_service_required", "public-service relationship is required")
+
+        def resource_uri(name: str) -> str | None:
+            relationship = getattr(relationships, name).data
             if relationship is None:
                 return None
-            identifier = relationship["id"]
-            return identifier if identifier.startswith("http") else (
-                f"http://data.lblod.info/id/{resource_type}/{identifier}"
-            )
+            identifier = relationship.id
+            parsed_identifier = urlsplit(identifier)
+            if parsed_identifier.scheme in {"http", "https"} and parsed_identifier.netloc:
+                return identifier
+            return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
 
-        guideline_relationship = relationships.get("guideline", {}).get("data")
+        guideline_relationship = relationships.guideline.data
         if guideline_relationship is None:
             guideline_uri = config.rewrite.guideline_uri
         else:
-            guideline_uri = guideline_relationship["id"]
-            if not urlsplit(guideline_uri).scheme:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "errors": [
-                            {
-                                "status": "400",
-                                "code": "invalid_guideline_reference",
-                                "detail": "Guideline relationship id must be an absolute URI",
-                            }
-                        ]
-                    },
-                    media_type=JSON_API_MEDIA_TYPE,
+            guideline_uri = guideline_relationship.id
+            parsed_guideline = urlsplit(guideline_uri)
+            if parsed_guideline.scheme not in {"http", "https"} or not parsed_guideline.netloc:
+                return _error(
+                    400,
+                    "invalid_guideline_reference",
+                    "Guideline relationship id must be an absolute URI",
                 )
 
         guideline_text = store.read_guideline(guideline_uri)
         if not guideline_text or not guideline_text.strip():
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "errors": [
-                        {
-                            "status": "404",
-                            "code": "guideline_not_found",
-                            "detail": "Guideline not found",
-                        }
-                    ]
-                },
-                media_type=JSON_API_MEDIA_TYPE,
-            )
+            return _error(404, "guideline_not_found", "Guideline not found")
 
-        public_service = resource_uri("public-service", "public-services")
-        requested_generation = resource_uri("field-generation", "field-generations")
-        based_on_uri = resource_uri("based-on", "generation-attempts")
+        public_service = resource_uri("public_service")
+        if public_service is None:
+            return _error(404, "public_service_not_found", "Public service not found")
+        requested_generation = resource_uri("field_generation")
+
+        if relationships.field_generation.data is not None and requested_generation is None:
+            return _error(404, "field_generation_not_found", "Field generation not found")
 
         # Reuse a requested generation, or create the generation for this field.
         if requested_generation:
@@ -269,11 +301,10 @@ async def create_rewrite(
                 related_subject, related_field, public_service
             )
 
-        # A based-on attempt must belong to the same field generation.
-        if based_on_uri:
-            store.load_attempt(based_on_uri)
-        address_form = store.read_language_variant(public_service)
+        address_form = store.read_language_variant(public_service) or "nl-be-x-formal"
         attempt_number = store.next_attempt_number(field_generation_uri)
+        if attempt_number > config.limits.max_attempts:
+            return _error(409, "attempt_limit_reached", "Maximum attempts reached for this field")
 
         # Only the model invocation is provider-dependent; persistence remains deterministic.
         started_at = datetime.now(timezone.utc)
@@ -289,7 +320,7 @@ async def create_rewrite(
 
         # Store the generated text and provenance as one domain operation.
         attempt_uri = _new_uri("generation-attempts")
-        activity_uri = _new_uri("generation-activities")
+        activity_uri = _new_uri("generation-tasks")
 
         store.write_attempt(
             attempt_uri=attempt_uri,
@@ -303,7 +334,6 @@ async def create_rewrite(
             address_form=address_form,
             guideline_uri=guideline_uri,
             agent_uri=agent_uri,
-            based_on_uri=based_on_uri,
             model_uri=model_name_to_uri(config.llm.model_name),
             endpoint=config.llm.base_url or config.llm.provider,
             tokens_in=usage.tokens_in,
@@ -311,11 +341,6 @@ async def create_rewrite(
             duration=usage.duration,
         )
         
-        based_on_relationship = (
-            {"data": {"type": "generation-attempts", "id": based_on_uri}}
-            if based_on_uri
-            else {"data": None}
-        )
         response = RewriteResponse(
             data=Resource(
                 type="generation-attempts",
@@ -331,13 +356,12 @@ async def create_rewrite(
                 ).model_dump(by_alias=True),
                 relationships={
                     "field-generation": {"data": {"type": "field-generations", "id": field_generation_uri}},
-                    "based-on": based_on_relationship,
-                    "generated-by": {"data": {"type": "generation-activities", "id": activity_uri}},
+                    "generated-by": {"data": {"type": "generation-tasks", "id": activity_uri}},
                 },
             ),
             included=[
                 Resource(
-                    type="generation-activities",
+                    type="generation-tasks",
                     id=activity_uri,
                     attributes=ActivityAttributes(
                         uri=activity_uri,
@@ -366,7 +390,13 @@ async def create_rewrite(
             content=response.model_dump(),
             media_type=JSON_API_MEDIA_TYPE,
         )
+    except (RewriteProviderError, RewriteValidationError):
+        logger.warning("Rewrite model call failed")
+        return _error(504, "model_provider_error", "The rewrite model could not produce a response")
     except Exception:
-        logger.exception("Rewrite request failed")
-        return JSONResponse(status_code=500, content={"error": "rewrite failed"})
+        logger.error("Rewrite request failed")
+        return _error(500, "rewrite_failed", "The rewrite request failed")
+
+
+app.include_router(router)
 

@@ -48,10 +48,9 @@ class FakeLlm:
 class FakeStore:
     """In-memory store double that records attempted persistence operations."""
 
-    def __init__(self, *, attempt_number=1, field_generation=None, predecessor=None):
+    def __init__(self, *, attempt_number=1, field_generation=None):
         self.attempt_number = attempt_number
         self.field_generation = field_generation
-        self.predecessor = predecessor
         self.writes = []
         self.guidelines = {
             ServiceConfig().rewrite.guideline_uri: "Gebruik actieve zinnen."
@@ -62,11 +61,15 @@ class FakeStore:
         self.guideline_reads.append(guideline_uri)
         return self.guidelines.get(guideline_uri)
 
+    def resolve_by_uuid(self, identifier, rdf_type):
+        resources = {
+            ("123", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"): PUBLIC_SERVICE,
+            ("1", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration"): FIELD_GENERATION,
+        }
+        return resources.get((identifier, rdf_type))
+
     def find_or_create_field_generation(self, related_subject, related_field, public_service):
         return FIELD_GENERATION
-
-    def load_attempt(self, attempt_uri):
-        return self.predecessor
 
     def read_language_variant(self, public_service_uri):
         return "nl-be-x-formal"
@@ -116,6 +119,7 @@ def configured_client():
     service_app.dependency_overrides[get_store] = lambda: store
     service_app.dependency_overrides[get_agent] = lambda: "http://example.org/agent/1"
     with TestClient(service_app) as client:
+        client.headers.update({"mu-session-id": "http://mu.semte.ch/sessions/test"})
         yield client, llm, store
     service_app.dependency_overrides.clear()
 
@@ -125,8 +129,8 @@ def configured_client():
 # ---------------------------------------------------------------------------
 
 
-def test_post_rewrite_returns_attempt_and_activity(configured_client):
-    """Return the completed attempt and included provenance activity."""
+def test_post_rewrite_returns_attempt_and_task(configured_client):
+    """Return the completed attempt and included provenance task."""
 
     client, llm, store = configured_client
 
@@ -141,7 +145,8 @@ def test_post_rewrite_returns_attempt_and_activity(configured_client):
     assert response.headers["content-type"].startswith("application/vnd.api+json")
     assert body["data"]["type"] == "generation-attempts"
     assert body["data"]["attributes"]["generated-text"] == "Vul het formulier in."
-    assert body["included"][0]["type"] == "generation-activities"
+    assert body["data"]["relationships"]["generated-by"]["data"]["type"] == "generation-tasks"
+    assert body["included"][0]["type"] == "generation-tasks"
     assert len(store.writes) == 1
     assert llm.calls == 1
     assert store.guideline_reads == [ServiceConfig().rewrite.guideline_uri]
@@ -237,6 +242,23 @@ def test_openapi_describes_json_api_request_body():
     assert media_type["example"]["data"]["relationships"]["public-service"]["data"]["id"] == "123"
 
 
+def test_post_rewrite_requires_a_session(configured_client):
+    """Reject requests without a session regardless of configuration flags."""
+
+    client, _, store = configured_client
+    client.headers.pop("mu-session-id")
+
+    response = client.post(
+        "/hh-rewrites",
+        json=request_payload(),
+        headers={"content-type": "application/vnd.api+json"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["errors"][0]["code"] == "session_required"
+    assert not store.writes
+
+
 @pytest.mark.parametrize(
     ("headers", "body", "status", "code"),
     [
@@ -269,26 +291,24 @@ def test_post_rewrite_rejects_invalid_requests(configured_client, headers, body,
     assert not store.writes
 
 
-def test_post_rewrite_rejects_unknown_based_on(configured_client):
-    """Reject a predecessor reference that cannot be loaded."""
+def test_post_rewrite_allows_comparison_operators(configured_client):
+    """Accept legal comparison operators that are not markup tags."""
 
-    client, _, store = configured_client
-    store.predecessor = None
+    client, llm, store = configured_client
 
     response = client.post(
         "/hh-rewrites",
         json=request_payload(
-            relationships={
-                "public-service": {"data": {"type": "public-services", "id": "123"}},
-                "based-on": {"data": {"type": "generation-attempts", "id": "missing"}},
+            attributes={
+                "original-text": "De aanvrager moet < 18 jaar zijn en > 1.000 euro betalen."
             }
         ),
         headers={"content-type": "application/vnd.api+json"},
     )
 
-    assert response.status_code == 404
-    assert response.json()["errors"][0]["code"] == "based_on_not_found"
-    assert not store.writes
+    assert response.status_code == 201
+    assert llm.calls == 1
+    assert len(store.writes) == 1
 
 
 def test_post_rewrite_rejects_attempt_limit(configured_client):

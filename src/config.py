@@ -35,31 +35,26 @@ class LimitsConfig(BaseModel):
     retries: int = 1
 
 
-class GraphConfig(BaseModel):
-    """Named graphs used by the template-provided SPARQL helpers."""
-
-    domain: str = "http://mu.semte.ch/graphs/public"
-    provenance: str = "http://mu.semte.ch/graphs/public"
-
-
 class PromptConfig(BaseModel):
     """System and user message templates used to assemble rewrite prompts."""
 
     system_message: str = (
-        "Rewrite the supplied Dutch field text according to the HH guidelines. "
-        "Preserve every fact, date, amount, condition and legal meaning. "
-        "Return only the rewritten text."
+        "Je bent een taaladviseur voor het lokaal bestuur. "
+        "Je herschrijft en verbetert veldteksten uitsluitend op taalkundig, "
+        "stilistisch en structureel niveau, volgens de Heerlijk Helder-richtlijnen. "
+        "Behoud elk feit, elke datum, elk bedrag, elke voorwaarde en de juridische betekenis. "
+        "Geef uitsluitend de herschreven tekst terug."
     )
     user_message: str = (
-        "Field: {field}\nAddress form: {address_form}\nGuidelines:\n{guidelines}\n\n"
-        "Text:\n{text}"
+        "Veld: {field}\nAanhefvorm: {address_form}\nRichtlijnen:\n{guidelines}\n\n"
+        "Tekst:\n{text}"
     )
 
 
 class RewriteConfig(BaseModel):
     """Guideline identity and prompt configuration."""
 
-    guideline_uri: str = "https://example.org/guidelines/hh/v1"
+    guideline_uri: str = "https://example.org/guidelines/hh/v3"
     prompt: PromptConfig = Field(default_factory=PromptConfig)
 
 
@@ -68,7 +63,6 @@ class ServiceConfig(BaseModel):
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
-    graphs: GraphConfig = Field(default_factory=GraphConfig)
     rewrite: RewriteConfig = Field(default_factory=RewriteConfig)
 
 
