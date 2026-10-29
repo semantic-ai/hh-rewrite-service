@@ -1,4 +1,4 @@
-"""JSON:API request and response models for HH rewrite attempts.
+"""JSON:API request and response models for HH rewrite activities.
 
 Python field names use snake_case, while aliases preserve the hyphenated
 JSON:API attribute and relationship names used by the public contract.
@@ -75,28 +75,20 @@ class RewriteRequest(BaseModel):
 
 
 class ActivityAttributes(BaseModel):
-    """Provenance activity attributes returned with a completed attempt."""
+    """Generation activity attributes returned after a completed rewrite."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     uri: str
+    attempt_number: int = Field(alias="attempt-number")
+    original_text: str = Field(alias="original-text")
+    generated_text: str = Field(alias="generated-text")
+    
     started_at: str = Field(alias="started-at")
     ended_at: str = Field(alias="ended-at")
     address_form: str = Field(alias="address-form")
     model: str
     language: str
-    status: str
-
-
-class AttemptAttributes(BaseModel):
-    """Generated-attempt attributes returned to the caller."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    uri: str
-    original_text: str = Field(alias="original-text")
-    generated_text: str = Field(alias="generated-text")
-    attempt_number: int = Field(alias="attempt-number")
     status: str
 
 

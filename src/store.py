@@ -1,8 +1,8 @@
-"""SPARQL persistence for field generations, attempts and provenance.
+"""SPARQL persistence for field generations, activities and provenance.
 
 The mu-python-template supplies query, update and escaping functions. This
 module owns only LPDC domain queries and the single persistence operation that
-writes an immutable generation attempt with its provenance records.
+writes a generation activity with its provenance records.
 """
 
 from __future__ import annotations
@@ -24,7 +24,10 @@ MU = "http://mu.semte.ch/vocabularies/core/"
 PROV = "http://www.w3.org/ns/prov#"
 EXT = "http://mu.semte.ch/vocabularies/ext/"
 DCT = "http://purl.org/dc/terms/"
-TASK = "http://redpencil.data.gift/vocabularies/tasks/"
+
+GENERATION_ACTIVITY = f"{LPDC}GenerationActivity"
+HAS_GENERATION_ACTIVITY = f"{LPDC}hasGenerationActivity"
+NOT_USED = f"{LPDC}notUsed"
 
 
 # ---------------------------------------------------------------------------
@@ -90,19 +93,20 @@ class Store:
         query = f"""SELECT ?generation WHERE {{
             ?generation a <{LPDC}FieldGeneration> ;
             <{LPDC}relatedSubject> {sparql_escape_uri(related_subject)} ;
-            <{LPDC}relatedField> {sparql_escape(related_field)} ;
+            <{LPDC}relatedField> {sparql_escape_uri(related_field)} ;
             <{LPDC}fieldGenerationInstance> {sparql_escape_uri(public_service)} .
         }} LIMIT 1"""
         existing = _value(template_query(query), "generation")
         if existing:
             return existing
-        generation = _uuid_uri("field-generations")
+        # mu-cl-resources mints field generations under /id/generations/.
+        generation = _uuid_uri("generations")
         triples = "\n".join(
             [
                 f"{sparql_escape_uri(generation)} a <{LPDC}FieldGeneration> ;",
                 f"    <{MU}uuid> {sparql_escape(generation.rsplit('/', 1)[-1])} ;",
                 f"    <{LPDC}relatedSubject> {sparql_escape_uri(related_subject)} ;",
-                f"    <{LPDC}relatedField> {sparql_escape(related_field)} ;",
+                f"    <{LPDC}relatedField> {sparql_escape_uri(related_field)} ;",
                 f"    <{LPDC}fieldGenerationInstance> {sparql_escape_uri(public_service)} .",
             ]
         )
@@ -113,7 +117,7 @@ class Store:
     FILTER NOT EXISTS {{
         ?existing a <{LPDC}FieldGeneration> ;
             <{LPDC}relatedSubject> {sparql_escape_uri(related_subject)} ;
-            <{LPDC}relatedField> {sparql_escape(related_field)} ;
+            <{LPDC}relatedField> {sparql_escape_uri(related_field)} ;
             <{LPDC}fieldGenerationInstance> {sparql_escape_uri(public_service)} .
     }}
 }}"""
@@ -125,7 +129,9 @@ class Store:
         """Return the next sequential attempt number for a field generation."""
 
         query = f"""SELECT (MAX(?number) AS ?max) WHERE {{
-            ?attempt <{LPDC}generationAttempt> {sparql_escape_uri(field_generation_uri)} ;
+            ?activity a <{PROV}Activity> ;
+                <{DCT}type> <{GENERATION_ACTIVITY}> ;
+                <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;
                 <{LPDC}attemptNumber> ?number .
         }}"""
         maximum = _value(template_query(query), "max")
@@ -134,15 +140,14 @@ class Store:
         except (TypeError, ValueError):
             return 1
 
-    def write_attempt(
+    def write_generation_activity(
         self,
         *,
-        attempt_uri: str,
+        activity_uri: str,
         field_generation_uri: str,
         attempt_number: int,
         original_text: str,
         generated_text: str,
-        activity_uri: str,
         started_at: datetime,
         ended_at: datetime,
         address_form: str,
@@ -154,27 +159,19 @@ class Store:
         tokens_out: int = 0,
         duration: float | None = None,
     ) -> None:
-        """Write one attempt and its provenance records in a single update."""
+        """Write one generation activity and its provenance in one update."""
 
-        # Domain data identifies the immutable generated attempt.
-        attempt_lines = [
-            f"{sparql_escape_uri(attempt_uri)} a <{LPDC}GenerationAttempt> ;",
-            f"    <{MU}uuid> {sparql_escape(attempt_uri.rsplit('/', 1)[-1])} ;",
-            f"    <{LPDC}generationAttempt> {sparql_escape_uri(field_generation_uri)} ;",
-            f"    <{LPDC}attemptNumber> {sparql_escape(attempt_number)} ;",
-            f"    <{LPDC}originalText> {sparql_escape(original_text)} ;",
-            f"    <{LPDC}generatedText> {sparql_escape(generated_text)} ;",
-            f"    <{PROV}wasGeneratedBy> {sparql_escape_uri(activity_uri)} .",
-        ]
-
-        # Provenance records capture timing, guideline and agent metadata.
         activity_lines = [
             f"{sparql_escape_uri(activity_uri)} a <{PROV}Activity> ;",
-            f"    a <{TASK}Task> ;",
+            f"    <{DCT}type> <{GENERATION_ACTIVITY}> ;",
             f"    <{MU}uuid> {sparql_escape(activity_uri.rsplit('/', 1)[-1])} ;",
+            f"    <{LPDC}attemptNumber> {sparql_escape_int(attempt_number)} ;",
+            f"    <{LPDC}originalText> {sparql_escape(original_text)} ;",
+            f"    <{LPDC}generatedText> {sparql_escape(generated_text)} ;",
+            f"    <{LPDC}status> <{NOT_USED}> ;",
+            f"    <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;",
             f"    <{PROV}startedAtTime> {sparql_escape(started_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}endedAtTime> {sparql_escape(ended_at.astimezone(timezone.utc))} ;",
-            f"    <{PROV}generated> {sparql_escape_uri(attempt_uri)} ;",
             f"    <{PROV}wasAssociatedWith> {sparql_escape_uri(agent_uri)} ;",
             f"    <{PROV}used> {sparql_escape_uri(guideline_uri)} ;",
             f"    <{EXT}addressForm> {sparql_escape(address_form)} ;",
@@ -199,8 +196,7 @@ class Store:
         else:
             ai_call_lines = []
 
-        domain = "\n".join(attempt_lines)
         provenance = "\n".join(activity_lines)
         if ai_call_lines:
             provenance += "\n" + "\n".join(ai_call_lines)
-        template_update("INSERT DATA {\n" + domain + "\n" + provenance + "\n}")
+        template_update("INSERT DATA {\n" + provenance + "\n}")

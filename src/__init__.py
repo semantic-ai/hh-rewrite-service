@@ -1,1 +1,0 @@
-"""LPDC HH rewrite service core modules."""

@@ -18,7 +18,7 @@ from web import get_agent, get_config, get_llm, get_store, router
 PUBLIC_SERVICE = "http://data.lblod.info/id/public-services/123"
 RELATED_SUBJECT = "http://data.lblod.info/id/procedures/456"
 FIELD_GENERATION = "http://data.lblod.info/id/field-generations/1"
-PREVIOUS_ATTEMPT = "http://data.lblod.info/id/generation-attempts/previous"
+PREVIOUS_ACTIVITY = "http://data.lblod.info/id/generation-activities/previous"
 service_app = FastAPI()
 service_app.include_router(router)
 
@@ -77,7 +77,7 @@ class FakeStore:
     def next_attempt_number(self, field_generation_uri):
         return self.attempt_number
 
-    def write_attempt(self, **values):
+    def write_generation_activity(self, **values):
         self.writes.append(values)
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ def request_payload(**overrides):
     attributes = {
         "original-text": "De aanvrager dient het formulier in te vullen.",
         "related-subject": RELATED_SUBJECT,
-        "related-field": "dct:title",
+        "related-field": "http://purl.org/dc/terms/title",
     }
     attributes.update(overrides.pop("attributes", {}))
     relationships = {
@@ -100,7 +100,7 @@ def request_payload(**overrides):
     relationships.update(overrides.pop("relationships", {}))
     return {
         "data": {
-            "type": "generation-attempts",
+            "type": "generation-activities",
             "attributes": attributes,
             "relationships": relationships,
         }
@@ -129,8 +129,8 @@ def configured_client():
 # ---------------------------------------------------------------------------
 
 
-def test_post_rewrite_returns_attempt_and_task(configured_client):
-    """Return the completed attempt and included provenance task."""
+def test_post_rewrite_returns_generation_activity(configured_client):
+    """Return the completed generation activity."""
 
     client, llm, store = configured_client
 
@@ -143,10 +143,11 @@ def test_post_rewrite_returns_attempt_and_task(configured_client):
     body = response.json()
     assert response.status_code == 201
     assert response.headers["content-type"].startswith("application/vnd.api+json")
-    assert body["data"]["type"] == "generation-attempts"
+    assert body["data"]["type"] == "generation-activities"
     assert body["data"]["attributes"]["generated-text"] == "Vul het formulier in."
-    assert body["data"]["relationships"]["generated-by"]["data"]["type"] == "generation-tasks"
-    assert body["included"][0]["type"] == "generation-tasks"
+    assert body["data"]["attributes"]["status"] == "notUsed"
+    assert body["data"]["relationships"]["field-generation"]["data"]["type"] == "field-generations"
+    assert body["included"] == []
     assert len(store.writes) == 1
     assert llm.calls == 1
     assert store.guideline_reads == [ServiceConfig().rewrite.guideline_uri]
@@ -275,6 +276,12 @@ def test_post_rewrite_requires_a_session(configured_client):
             request_payload(attributes={"original-text": "<p>Vul het formulier in.</p>"}),
             422,
             "markup_not_allowed",
+        ),
+        (
+            {"content-type": "application/vnd.api+json"},
+            request_payload(attributes={"related-field": "http://purl.org/dc/terms/title"}),
+            400,
+            "invalid_related_field",
         ),
     ],
 )

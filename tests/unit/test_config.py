@@ -24,5 +24,5 @@ def test_config_loads_default_guideline_uri(tmp_path: Path) -> None:
     )
 
     assert config.llm.model_name == "test-model"
-    assert config.rewrite.guideline_uri == "https://example.org/guidelines/hh/v1"
+    assert config.rewrite.guideline_uri == "https://example.org/guidelines/hh/v3"
 

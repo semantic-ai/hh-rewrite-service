@@ -2,7 +2,7 @@
 
 ## Overview
 
-This service turns an LPDC field value into a rewritten, guideline-aligned text suggestion for Heerlijk Helder (HH). It takes the original text, the owning public service and field, selects the configured rewrite guideline, asks the configured LLM to produce a better phrasing, and persists the result as a generation attempt with provenance in the triplestore.
+This service turns an LPDC field value into a rewritten, guideline-aligned text suggestion for Heerlijk Helder (HH). It takes the original text, the owning public service and field, selects the configured rewrite guideline, asks the configured LLM to produce a better phrasing, and persists the result as a generation activity with provenance in the triplestore.
 
 It is meant to support iterative rewriting of the same field: each field keeps a stable generation context, and later attempts can build on earlier suggestions while preserving the source text and provenance trail.
 
@@ -19,22 +19,21 @@ provide `mu:uuid`, `dct:title` and `ext:guidelineText`.
 
 ## Data model
 
-The service stores one stable field-generation resource and one immutable
-generation-attempt resource for every rewrite. The provenance resource is
-exposed as a task-facing `generation-tasks` resource, while its RDF node is
-typed as both `prov:Activity` and `tasks:Task`. It records the model
-invocation and links the attempt to the selected guideline and agent. An
-`ext:AICall` resource records the provider call details when model metadata is
+The service stores one stable field-generation resource and one generation
+activity for every rewrite. The activity is typed as `prov:Activity` and has
+`dct:type lpdcExt:GenerationActivity`. It contains the attempt number, source
+text, generated text and review status, and records the model invocation and
+links to the selected guideline and agent. An `ext:AICall` resource records
+the provider call details when model metadata is
 available.
 
 The prefixes currently used by the writer are:
 
 | Prefix | Namespace | Use |
 | --- | --- | --- |
-| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | Field-generation and attempt terms. This use is provisional: these terms extend the published LPDC model and the namespace owner still needs to be confirmed. |
+| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | Field-generation and generation-activity terms. |
 | `mu` | `http://mu.semte.ch/vocabularies/core/` | Shared UUID values. |
 | `prov` | `http://www.w3.org/ns/prov#` | Activity and provenance relationships. |
-| `tasks` | `http://redpencil.data.gift/vocabularies/tasks/` | Task type used alongside `prov:Activity` for the task-facing provenance resource. |
 | `ext` | `http://mu.semte.ch/vocabularies/ext/` | Guideline and AI-call metadata owned by the shared service conventions. |
 | `dct` | `http://purl.org/dc/terms/` | Language metadata. |
 
@@ -43,15 +42,14 @@ The main resources and predicates are:
 | Resource | Predicates written by this service |
 | --- | --- |
 | `lpdcExt:FieldGeneration` | `lpdcExt:relatedSubject`, `lpdcExt:relatedField`, `lpdcExt:fieldGenerationInstance`, `mu:uuid` |
-| `lpdcExt:GenerationAttempt` | `lpdcExt:generationAttempt`, `lpdcExt:attemptNumber`, `lpdcExt:originalText`, `lpdcExt:generatedText`, `prov:wasGeneratedBy`, `mu:uuid` |
-| `prov:Activity` + `tasks:Task` | `prov:startedAtTime`, `prov:endedAtTime`, `prov:generated`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
-| `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the task with `ext:performedAICall` |
+| `prov:Activity` with `dct:type lpdcExt:GenerationActivity` | `lpdcExt:attemptNumber`, `lpdcExt:originalText`, `lpdcExt:generatedText`, `lpdcExt:status`, `lpdcExt:hasGenerationActivity`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
+| `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall` |
 
 The guideline is read as an existing `ext:Guideline` resource. Its required
 properties are `mu:uuid`, `dct:title` and `ext:guidelineText`. The service does
 not create or update guideline resources.
 
-For example, one stored attempt has this shape:
+For example, one stored generation activity has this shape:
 
 ```turtle
 @prefix dct: <http://purl.org/dc/terms/> .
@@ -59,20 +57,15 @@ For example, one stored attempt has this shape:
 @prefix lpdcExt: <https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#> .
 @prefix mu: <http://mu.semte.ch/vocabularies/core/> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
-@prefix tasks: <http://redpencil.data.gift/vocabularies/tasks/> .
-
-<http://data.lblod.info/id/generation-attempts/example>
-    a lpdcExt:GenerationAttempt ;
-    lpdcExt:generationAttempt <http://data.lblod.info/id/field-generations/example> ;
-    lpdcExt:attemptNumber 1 ;
-    lpdcExt:originalText "De aanvrager dient het formulier in te vullen." ;
-    lpdcExt:generatedText "Vul het formulier in." ;
-    prov:wasGeneratedBy <http://data.lblod.info/id/generation-tasks/example> .
-
-<http://data.lblod.info/id/generation-tasks/example>
+<http://data.lblod.info/id/generation-activities/example>
     a prov:Activity ;
-    a tasks:Task ;
-    prov:generated <http://data.lblod.info/id/generation-attempts/example> ;
+  mu:uuid "example" ;
+  dct:type lpdcExt:GenerationActivity ;
+  lpdcExt:attemptNumber 1 ;
+  lpdcExt:originalText "De aanvrager dient het formulier in te vullen." ;
+  lpdcExt:generatedText "Vul het formulier in." ;
+  lpdcExt:status lpdcExt:notUsed ;
+  lpdcExt:hasGenerationActivity <http://data.lblod.info/id/field-generations/example> ;
     prov:wasAssociatedWith <http://lblod.data.gift/id/components/hh-rewrite/v1.0.0> ;
     prov:used <https://example.org/guidelines/hh/v3> ;
     ext:addressForm "nl-be-x-formal" ;
@@ -98,11 +91,11 @@ For example, one stored attempt has this shape:
 ```json
 {
 	"data": {
-		"type": "generation-attempts",
+		"type": "generation-activities",
 		"attributes": {
 			"original-text": "De aanvrager dient het formulier in te vullen.",
 			"related-subject": "http://data.lblod.info/id/procedures/456",
-			"related-field": "dct:title"
+			"related-field": "http://purl.org/dc/terms/title"
 		},
 		"relationships": {
 			"public-service": {
@@ -110,27 +103,28 @@ For example, one stored attempt has this shape:
 			},
 			"field-generation": {"data": null},
       "guideline": {"data": null}
-		}
-	}
+    }
+  }
 }
 ```
 
 ### Request body explained
 
 The request is a JSON:API document. The top-level `data` object describes
-the rewrite attempt being requested:
+the generation activity being requested:
 
 | Part | Required? | Meaning |
 | --- | --- | --- |
-| `data.type` | Yes | Must be `generation-attempts`. This is the resource type that the service will create. |
+| `data.type` | Yes | Must be `generation-activities`. This is the resource type that the service will create. |
 | `data.attributes.original-text` | Yes | Plain text sent to the model. Empty text and markup are rejected, and the service enforces `limits.max_input_length`. |
 | `data.attributes.related-subject` | Yes | URI of the concrete resource that owns the field, such as a procedure or rule. |
-| `data.attributes.related-field` | Yes | Predicate/name of the field on that subject, such as `dct:title`. |
+| `data.attributes.related-field` | Yes | Absolute URI of the field predicate on that subject, such as `http://purl.org/dc/terms/title`. |
 | `data.relationships` | `public-service` is required for a successful request | The rewrite cannot proceed without `data.relationships.public-service`. Send the `public-service` relationship shown below. |
 
 The `related-subject` and `related-field` pair identifies the exact field.
 `related-field` alone is not enough because different nested resources can
-have the same predicate.
+have the same predicate. The service requires `related-field` to be an
+absolute URI.
 
 ### How the guideline is selected
 
@@ -214,7 +208,7 @@ The rewrite resources are nested conceptually under an existing LPDC
 ```text
 public-service (the concrete LPDC product/service instance)
 ├── field-generations (one per addressable field)
-│   └── generation-attempts (one per rewrite)
+│   └── generation-activities (one per rewrite)
 └── decision-documents (source documents; Track 1)
     └── attachments
         └── sub-attachments
@@ -225,8 +219,8 @@ The corresponding JSON:API resource types are:
 | Resource type | Role | Main relationship |
 | --- | --- | --- |
 | `public-services` | Concrete LPDC service/product instance (`lpdcExt:InstancePublicService`) | Context for the resources below |
-| `field-generations` | Stable grouping for one field on that service | Belongs to a `public-service`; contains attempts |
-| `generation-attempts` | One immutable AI rewrite result and its input/output text | Belongs to a `field-generation` |
+| `field-generations` | Stable grouping for one field on that service | Belongs to a `public-service`; contains generation activities |
+| `generation-activities` | One AI rewrite activity with its input/output text and review status | Belongs to a `field-generation` |
 | `decision-documents` | Source document used by the extraction workflow | Belongs to a `public-service` |
 | `attachments` | File content attached to a decision document | Belongs to a `decision-document` or another attachment |
 
@@ -237,7 +231,7 @@ context and reads instance-specific settings such as
 
 The field being rewritten is identified by the pair
 `related-subject` and `related-field`. For example, `related-field` may be
-`dct:title`, while `related-subject` identifies the particular procedure or
+`http://purl.org/dc/terms/title`, while `related-subject` identifies the particular procedure or
 rule whose title is being rewritten. This is necessary because nested LPDC
 resources can use the same predicate.
 
@@ -246,18 +240,19 @@ The lifecycle of a rewrite is therefore:
 ```text
 public-service
     └── field-generation
-            ├── generation-attempt 1
-            ├── generation-attempt 2
-            └── generation-attempt 3
+            ├── generation-activity 1
+            ├── generation-activity 2
+            └── generation-activity 3
 ```
 
 The `field-generation` is reused for subsequent rewrites of the same
-addressable field. Each `generation-attempt` records the text supplied to that
-attempt (`original-text`), the model suggestion (`generated-text`) and,
-where applicable, the user-selected or corrected value (`final-text`).
-`field-generation` and `generation-attempt` are persistence resources exposed
+addressable field. Each `generation-activity` records the text supplied to that
+activity (`original-text`), the model suggestion (`generated-text`) and its
+status (`notUsed` or `used`). The rewrite service does not write
+`final-text`.
+`field-generation` and `generation-activity` are persistence resources exposed
 by mu-cl-resources; this service owns the rewrite action and writes the
-resulting attempt and provenance task.
+resulting activity and provenance data.
 
 When the container is running, open [http://localhost:8080/docs](http://localhost:8080/docs),
 select `POST /hh-rewrites`, click **Try it out**, and use the generated JSON:API example.
@@ -274,7 +269,7 @@ set when deploying with the mu-python-template runtime.
 At startup, the service waits for the triplestore and registers the versioned
 rewrite agent through `decide-ai-service-base`. Agent configuration hashing and
 agent reuse are handled by that package; rewrite requests only reference the
-registered agent URI in their provenance task.
+registered agent URI in their provenance activity.
 
 ## Compose
 

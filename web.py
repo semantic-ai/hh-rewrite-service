@@ -33,7 +33,6 @@ from src.rewrite import (
 )
 from src.schema import (
     ActivityAttributes,
-    AttemptAttributes,
     Resource,
     RewriteRequest,
     RewriteResponse,
@@ -85,7 +84,7 @@ REQUEST_BODY_SCHEMA = {
             "properties": {
                 "type": {
                     "type": "string",
-                    "example": "generation-attempts",
+                    "example": "generation-activities",
                 },
                 "attributes": {
                     "type": "object",
@@ -102,7 +101,8 @@ REQUEST_BODY_SCHEMA = {
                         },
                         "related-field": {
                             "type": "string",
-                            "example": "dct:title",
+                            "format": "uri",
+                            "example": "http://purl.org/dc/terms/title",
                         },
                     },
                 },
@@ -197,11 +197,11 @@ def get_agent() -> str:
                     "schema": REQUEST_BODY_SCHEMA,
                     "example": {
                         "data": {
-                            "type": "generation-attempts",
+                            "type": "generation-activities",
                             "attributes": {
                                 "original-text": "De aanvrager dient het formulier in te vullen.",
                                 "related-subject": "http://data.lblod.info/id/procedures/456",
-                                "related-field": "dct:title",
+                                "related-field": "http://purl.org/dc/terms/title",
                             },
                             "relationships": {
                                 "public-service": {
@@ -227,7 +227,7 @@ async def create_rewrite(
     config: ServiceConfig = Depends(get_config),
     agent_uri: str = Depends(get_agent),
 ) -> JSONResponse:
-    """Run one rewrite, persist it and return the generated attempt."""
+    """Run one rewrite, persist it and return the generated activity."""
 
     try:
         
@@ -240,14 +240,22 @@ async def create_rewrite(
             logger.debug("Invalid rewrite request")
             return _error(400, "invalid_request", "Request body is not valid JSON:API")
 
-        if payload.data.type != "generation-attempts":
-            return _error(400, "invalid_request", "data.type must be generation-attempts")
+        if payload.data.type != "generation-activities":
+            return _error(400, "invalid_request", "data.type must be generation-activities")
 
         attributes = payload.data.attributes
         relationships = payload.data.relationships
         original_text = attributes.original_text
         related_subject = attributes.related_subject
         related_field = attributes.related_field
+
+        parsed_related_field = urlsplit(related_field)
+        if parsed_related_field.scheme not in {"http", "https"} or not parsed_related_field.netloc:
+            return _error(
+                400,
+                "invalid_related_field",
+                "related-field must be an absolute predicate URI",
+            )
 
         if not original_text.strip():
             return _error(422, "empty_text", "original-text must not be empty")
@@ -319,16 +327,14 @@ async def create_rewrite(
         ended_at = datetime.now(timezone.utc)
 
         # Store the generated text and provenance as one domain operation.
-        attempt_uri = _new_uri("generation-attempts")
-        activity_uri = _new_uri("generation-tasks")
+        activity_uri = _new_uri("generation-activities")
 
-        store.write_attempt(
-            attempt_uri=attempt_uri,
+        store.write_generation_activity(
+            activity_uri=activity_uri,
             field_generation_uri=field_generation_uri,
             attempt_number=attempt_number,
             original_text=original_text,
             generated_text=result.generated_text,
-            activity_uri=activity_uri,
             started_at=started_at,
             ended_at=ended_at,
             address_form=address_form,
@@ -343,47 +349,33 @@ async def create_rewrite(
         
         response = RewriteResponse(
             data=Resource(
-                type="generation-attempts",
-                id=attempt_uri,
-                attributes=AttemptAttributes(
-                    uri=attempt_uri,
+                type="generation-activities",
+                id=activity_uri,
+                attributes=ActivityAttributes(
+                    uri=activity_uri,
                     **{
+                        "attempt-number": attempt_number,
                         "original-text": original_text,
                         "generated-text": result.generated_text,
-                        "attempt-number": attempt_number,
-                        "status": "completed",
+                        "started-at": _iso(started_at),
+                        "ended-at": _iso(ended_at),
+                        "model": config.llm.model_name,
+                        "address-form": address_form,
+                        "language": "nl",
+                        "status": "notUsed",
                     },
                 ).model_dump(by_alias=True),
                 relationships={
                     "field-generation": {"data": {"type": "field-generations", "id": field_generation_uri}},
-                    "generated-by": {"data": {"type": "generation-tasks", "id": activity_uri}},
+                    "guideline": {
+                        "data": {"type": "guidelines", "id": guideline_uri}
+                    },
+                    "agent": {
+                        "data": {"type": "agents", "id": agent_uri}
+                    },
                 },
             ),
-            included=[
-                Resource(
-                    type="generation-tasks",
-                    id=activity_uri,
-                    attributes=ActivityAttributes(
-                        uri=activity_uri,
-                        **{
-                            "started-at": _iso(started_at),
-                            "ended-at": _iso(ended_at),
-                            "model": config.llm.model_name,
-                            "address-form": address_form,
-                            "language": "nl",
-                            "status": "completed",
-                        },
-                    ).model_dump(by_alias=True),
-                    relationships={
-                        "guideline": {
-                            "data": {"type": "guidelines", "id": guideline_uri}
-                        },
-                        "agent": {
-                            "data": {"type": "agents", "id": agent_uri}
-                        }
-                    },
-                )
-            ],
+            included=[],
         )
         return JSONResponse(
             status_code=201,
