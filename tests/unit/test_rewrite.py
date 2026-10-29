@@ -4,12 +4,14 @@ import asyncio
 
 import pytest
 
-from src.config import ServiceConfig
+from src.config import FieldLabel, ServiceConfig
 from src.rewrite import (
     LangChainLlmClient,
     RewriteValidationError,
+    address_form_label,
     assemble_prompt,
     extract_usage,
+    field_label,
     rewrite_text,
     validate_output,
 )
@@ -55,6 +57,36 @@ def test_prompt_contains_field_guidelines_address_form_and_text() -> None:
     assert "nl-be-x-formal" in prompt
     assert "Gebruik actieve zinnen." in prompt
     assert "De aanvrager vult het formulier in." in prompt
+
+
+def test_field_label_uses_subject_type_to_disambiguate_predicates() -> None:
+    """Map a shared predicate to the field of the subject that owns it."""
+
+    config = ServiceConfig()
+    description = "http://purl.org/dc/terms/description"
+
+    assert field_label(config, ["http://data.europa.eu/m8g/Requirement"], description) == "Voorwaarden"
+    assert field_label(config, ["http://purl.org/vocab/cpsv#Rule"], description) == "Procedure"
+    assert field_label(config, ["http://example.org/Unknown"], description) == description
+
+
+def test_field_label_falls_back_to_type_independent_entry() -> None:
+    """Use an entry without subject type when no scoped entry matches."""
+
+    config = ServiceConfig()
+    config.rewrite.field_labels.append(FieldLabel(field="http://example.org/note", label="Notitie"))
+
+    assert field_label(config, [], "http://example.org/note") == "Notitie"
+
+
+def test_address_form_label_maps_language_variants() -> None:
+    """Translate instance language variants to the guideline address form."""
+
+    config = ServiceConfig()
+
+    assert address_form_label(config, "nl-be-x-formal") == "u-vorm"
+    assert address_form_label(config, "nl-be-x-informal") == "je-vorm"
+    assert address_form_label(config, "onbekend") == "onbekend"
 
 
 def test_validate_output_rejects_empty_refusal_and_preamble() -> None:

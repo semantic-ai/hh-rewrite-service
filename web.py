@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -17,17 +18,15 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from decide_ai_service_base.ai_logging import model_name_to_uri
-from decide_ai_service_base.util import (
-    app,
-    get_agent_uri,
-    wait_for_triplestore,
-    write_agent_info,
-)
+from decide_ai_service_base.util import app, get_agent_uri, write_agent_info
+from helpers import ALLOW_MU_AUTH_SUDO, query as template_query
 
 from src.config import ServiceConfig, get_config
 from src.rewrite import (
     RewriteProviderError,
     RewriteValidationError,
+    address_form_label,
+    field_label,
     make_llm,
     rewrite_text,
 )
@@ -121,10 +120,35 @@ REQUEST_BODY_SCHEMA = {
 }
 
 
+def wait_for_triplestore() -> None:
+    """Block until the triplestore answers a query.
+
+    Mirrors decide_ai_service_base.util.wait_for_triplestore, which queries with
+    sudo. This service runs without ALLOW_MU_AUTH_SUDO, so it queries the
+    graphs readable without a session instead.
+    """
+
+    logger.info("Waiting for triplestore...")
+    while True:
+        try:
+            result = template_query("SELECT ?s WHERE { ?s ?p ?o . } LIMIT 1")
+            if result["results"]["bindings"]:
+                break
+        except Exception:
+            logger.info("Triplestore not live yet, retrying...")
+        time.sleep(1)
+    logger.info("Triplestore ready!")
+
+
 @app.on_event("startup")
 async def startup_event():
     wait_for_triplestore()
-    write_agent_info(AGENT_URI)
+    if ALLOW_MU_AUTH_SUDO:
+        write_agent_info(AGENT_URI)
+    else:
+        # write_agent_info needs sudo to write the jobs graph; without it the
+        # agent resource is seeded by a migration instead.
+        app.state.agent_uris[""] = AGENT_URI
 
 
 def _new_uri(resource_type: str) -> str:
@@ -230,10 +254,9 @@ async def create_rewrite(
     """Run one rewrite, persist it and return the generated activity."""
 
     try:
-        
         if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != JSON_API_MEDIA_TYPE:
             return _error(415, "unsupported_media_type", "Content-Type must be application/vnd.api+json")
- 
+
         try:
             payload = RewriteRequest.model_validate(await request.json())
         except (ValueError, ValidationError):
@@ -259,6 +282,8 @@ async def create_rewrite(
 
         if not original_text.strip():
             return _error(422, "empty_text", "original-text must not be empty")
+        if re.search(r"<\s*/?\s*[A-Za-z][^>]*>", original_text):
+            return _error(422, "markup_not_allowed", "original-text must not contain markup")
         if len(original_text) > config.limits.max_input_length:
             return _error(413, "input_too_large", "original-text exceeds the configured maximum length")
 
@@ -270,10 +295,11 @@ async def create_rewrite(
             relationship = getattr(relationships, name).data
             if relationship is None:
                 return None
+            # Both forms resolve through authorization, which is the only access check.
             identifier = relationship.id
             parsed_identifier = urlsplit(identifier)
             if parsed_identifier.scheme in {"http", "https"} and parsed_identifier.netloc:
-                return identifier
+                return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
             return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
 
         guideline_relationship = relationships.guideline.data
@@ -314,13 +340,18 @@ async def create_rewrite(
         if attempt_number > config.limits.max_attempts:
             return _error(409, "attempt_limit_reached", "Maximum attempts reached for this field")
 
+        # The prompt gets readable labels; provenance keeps the raw URI and variant.
+        subject_types = store.read_subject_types(related_subject)
+        prompt_field = field_label(config, subject_types, related_field)
+        prompt_address_form = address_form_label(config, address_form)
+
         # Only the model invocation is provider-dependent; persistence remains deterministic.
         started_at = datetime.now(timezone.utc)
         result, usage = await rewrite_text(
             config,
             llm,
-            field=related_field,
-            address_form=address_form,
+            field=prompt_field,
+            address_form=prompt_address_form,
             guideline_text=guideline_text,
             text=original_text,
         )
@@ -388,7 +419,4 @@ async def create_rewrite(
     except Exception:
         logger.error("Rewrite request failed")
         return _error(500, "rewrite_failed", "The rewrite request failed")
-
-
-app.include_router(router)
 

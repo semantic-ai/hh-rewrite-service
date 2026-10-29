@@ -17,6 +17,48 @@ The configured guideline URI is resolved on every rewrite request through the
 authorized SPARQL endpoint. The resource must be typed `ext:Guideline` and
 provide `mu:uuid`, `dct:title` and `ext:guidelineText`.
 
+### Context window
+
+`llm.num_ctx` sets the context window in tokens and is only passed to the
+`ollama` provider. Hosted providers (`openai`, `mistralai`) have a fixed
+context window and ignore it. Ollama's default window is small and it
+silently drops the start of longer prompts, which is where the guidelines
+are, so set it explicitly for local models, for example `"num_ctx": 8192` or
+`LLM__NUM_CTX=8192`. A rewrite combines the system prompt, the guideline, up
+to `limits.max_input_length` characters of input and the generated output.
+
+### Prompt labels
+
+The model receives readable labels instead of raw identifiers. Two fixed
+dictionaries in `rewrite` map them; persistence still stores the raw values.
+
+- `address_forms` maps the instance's `lpdcExt:dutchLanguageVariant` to the
+  address form named in the guidelines: `nl` and `nl-be-x-formal` to `u-vorm`,
+  `nl-be-x-informal` to `je-vorm`. Unknown variants are passed unchanged.
+- `field_labels` maps a field to the field name used in the HH guidelines,
+  such as `Producttitel`, `Voorwaarden` or `Procedure`. Each entry has a
+  `field` predicate URI, a `label` and an optional `subject_type`. Because
+  nested LPDC resources reuse predicates such as `dct:description`, the
+  service reads the RDF types of `related-subject` and first looks for an
+  entry matching both type and field. If none matches, it uses an entry
+  without `subject_type`. If that also fails, it sends the field URI itself.
+
+```json
+"rewrite": {
+  "address_forms": { "nl-be-x-formal": "u-vorm", "nl-be-x-informal": "je-vorm" },
+  "field_labels": [
+    {
+      "subject_type": "http://data.europa.eu/m8g/Requirement",
+      "field": "http://purl.org/dc/terms/description",
+      "label": "Voorwaarden"
+    }
+  ]
+}
+```
+
+Setting either key in `config.json` replaces the built-in defaults in
+[src/config.py](./src/config.py) as a whole, so list every entry you need.
+
 ## Data model
 
 The service stores one stable field-generation resource and one generation
@@ -227,13 +269,15 @@ The corresponding JSON:API resource types are:
 `public-services` is not created by this rewrite service. It is an existing
 LPDC resource. The service uses its identifier to establish the product
 context and reads instance-specific settings such as
-`lpdcExt:dutchLanguageVariant`.
+`lpdcExt:dutchLanguageVariant`, which is mapped to `u-vorm` or `je-vorm`
+before it reaches the model (see [Prompt labels](#prompt-labels)).
 
 The field being rewritten is identified by the pair
 `related-subject` and `related-field`. For example, `related-field` may be
 `http://purl.org/dc/terms/title`, while `related-subject` identifies the particular procedure or
 rule whose title is being rewritten. This is necessary because nested LPDC
-resources can use the same predicate.
+resources can use the same predicate. The service reads the RDF types of
+`related-subject` to give the model the matching field name.
 
 The lifecycle of a rewrite is therefore:
 
@@ -266,10 +310,23 @@ it. The development compose stack configures both `MU_SPARQL_ENDPOINT` and
 set when deploying with the mu-python-template runtime.
 
 
-At startup, the service waits for the triplestore and registers the versioned
-rewrite agent through `decide-ai-service-base`. Agent configuration hashing and
-agent reuse are handled by that package; rewrite requests only reference the
-registered agent URI in their provenance activity.
+Request handling never uses sudo. Every query carries the caller's session
+headers, so mu-authorization is the only access check: a public service or
+field generation the user cannot see resolves to a 404 before the model is
+called.
+
+At startup, the service waits until the triplestore answers a query without
+sudo and then registers its agent:
+
+- With `ALLOW_MU_AUTH_SUDO=true`, `write_agent_info` of
+  `decide-ai-service-base` registers a versioned agent linked to a hash of the
+  mounted configuration. This needs `COMPOSE_FILE`, `COMPOSE_SERVICE` and the
+  compose file mounted into the container.
+- Without sudo (the LPDC app), the service uses the fixed agent URI
+  `http://lblod.data.gift/id/components/hh-rewrite/v1.0.0`, which a migration
+  in the app stack creates.
+
+Rewrite requests reference the registered URI in their provenance activity.
 
 ## Compose
 

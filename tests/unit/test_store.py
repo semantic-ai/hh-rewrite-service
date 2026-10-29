@@ -54,9 +54,9 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
     assert len(updates) == 1
     assert updates[0].startswith("INSERT DATA")
     assert "a <http://www.w3.org/ns/prov#Activity>" in updates[0]
-    assert "http://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#GenerationActivity" in updates[0]
-    assert "http://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#notUsed" in updates[0]
-    assert "http://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#hasGenerationActivity" in updates[0]
+    assert "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#GenerationActivity" in updates[0]
+    assert "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#notUsed" in updates[0]
+    assert "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#hasGenerationActivity" in updates[0]
     assert 'Origineel \\\"tekst\\\" \\\\\\"' in updates[0]
     assert "hasConfig" not in updates[0]
     assert "configHash" not in updates[0]
@@ -112,6 +112,51 @@ def test_resolve_by_uuid_filters_rdf_type(monkeypatch) -> None:
         == "http://example.org/service/1"
     )
     assert " a <https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService>" in queries[0]
+
+
+def test_resolve_by_uri_returns_none_when_not_visible(monkeypatch) -> None:
+    """Treat a URI hidden by authorization as an unknown resource."""
+
+    queries = []
+    monkeypatch.setattr(
+        store_module,
+        "template_query",
+        lambda query: queries.append(query) or {"results": {"bindings": []}},
+    )
+    monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
+
+    assert (
+        Store().resolve_by_uri(
+            "http://example.org/service/1",
+            "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService",
+        )
+        is None
+    )
+    assert "VALUES ?resource { <http://example.org/service/1> }" in queries[0]
+    assert "?resource a <https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService>" in queries[0]
+
+
+def test_read_subject_types_returns_all_types(monkeypatch) -> None:
+    """Return every RDF type of the subject that owns the field."""
+
+    monkeypatch.setattr(
+        store_module,
+        "template_query",
+        lambda query: {
+            "results": {
+                "bindings": [
+                    {"type": {"value": "http://data.europa.eu/m8g/Requirement"}},
+                    {"type": {"value": "http://example.org/Other"}},
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
+
+    assert Store().read_subject_types("http://example.org/requirement/1") == [
+        "http://data.europa.eu/m8g/Requirement",
+        "http://example.org/Other",
+    ]
 
 
 def test_write_generation_activity_links_aicall_to_activity(monkeypatch) -> None:

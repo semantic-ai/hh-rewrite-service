@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import web
 from src.config import ServiceConfig
 from web import get_agent, get_config, get_llm, get_store, router
 
@@ -68,11 +71,21 @@ class FakeStore:
         }
         return resources.get((identifier, rdf_type))
 
+    def resolve_by_uri(self, uri, rdf_type):
+        resources = {
+            (PUBLIC_SERVICE, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"),
+            (FIELD_GENERATION, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration"),
+        }
+        return uri if (uri, rdf_type) in resources else None
+
     def find_or_create_field_generation(self, related_subject, related_field, public_service):
         return FIELD_GENERATION
 
     def read_language_variant(self, public_service_uri):
         return "nl-be-x-formal"
+
+    def read_subject_types(self, subject_uri):
+        return ["https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"]
 
     def next_attempt_number(self, field_generation_uri):
         return self.attempt_number
@@ -119,7 +132,6 @@ def configured_client():
     service_app.dependency_overrides[get_store] = lambda: store
     service_app.dependency_overrides[get_agent] = lambda: "http://example.org/agent/1"
     with TestClient(service_app) as client:
-        client.headers.update({"mu-session-id": "http://mu.semte.ch/sessions/test"})
         yield client, llm, store
     service_app.dependency_overrides.clear()
 
@@ -155,6 +167,9 @@ def test_post_rewrite_returns_generation_activity(configured_client):
     assert store.writes[0]["model_uri"].endswith("#gpt-6-luna")
     assert store.writes[0]["endpoint"] == "openai"
     assert "Gebruik actieve zinnen." in llm.messages[0][1]["content"]
+    assert "Veld: Producttitel" in llm.messages[0][1]["content"]
+    assert "Aanhefvorm: u-vorm" in llm.messages[0][1]["content"]
+    assert store.writes[0]["address_form"] == "nl-be-x-formal"
 
 
 def test_post_rewrite_uses_request_guideline_uri(configured_client):
@@ -179,7 +194,7 @@ def test_post_rewrite_uses_request_guideline_uri(configured_client):
     assert response.status_code == 201
     assert store.guideline_reads == [guideline_uri]
     assert store.writes[0]["guideline_uri"] == guideline_uri
-    assert response.json()["included"][0]["relationships"]["guideline"]["data"]["id"] == guideline_uri
+    assert response.json()["data"]["relationships"]["guideline"]["data"]["id"] == guideline_uri
     assert "Gebruik de actieve aanspreekvorm." in llm.messages[0][1]["content"]
 
 
@@ -243,20 +258,74 @@ def test_openapi_describes_json_api_request_body():
     assert media_type["example"]["data"]["relationships"]["public-service"]["data"]["id"] == "123"
 
 
-def test_post_rewrite_requires_a_session(configured_client):
-    """Reject requests without a session regardless of configuration flags."""
+def test_wait_for_triplestore_retries_without_sudo(monkeypatch):
+    """Poll until a non-sudo query returns data, retrying on errors and empty results."""
 
-    client, _, store = configured_client
-    client.headers.pop("mu-session-id")
+    calls = []
+    responses = [
+        ConnectionError("database down"),
+        {"results": {"bindings": []}},
+        {"results": {"bindings": [{"s": {"value": "http://example.org/s"}}]}},
+    ]
+
+    def fake_query(query, **kwargs):
+        calls.append(kwargs)
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(web, "template_query", fake_query)
+    monkeypatch.setattr(web.time, "sleep", lambda seconds: None)
+
+    web.wait_for_triplestore()
+
+    assert calls == [{}, {}, {}]
+
+
+@pytest.mark.parametrize(
+    ("sudo", "expected_agent"),
+    [(True, "http://example.org/agent/registered"), (False, web.AGENT_URI)],
+)
+def test_startup_registers_agent_only_with_sudo(monkeypatch, sudo, expected_agent):
+    """Register the agent through write_agent_info with sudo, else use the fixed URI."""
+
+    def fake_write_agent_info(service_base):
+        web.app.state.agent_uris[""] = "http://example.org/agent/registered"
+
+    monkeypatch.setattr(web, "ALLOW_MU_AUTH_SUDO", sudo)
+    monkeypatch.setattr(web, "wait_for_triplestore", lambda: None)
+    monkeypatch.setattr(web, "write_agent_info", fake_write_agent_info)
+    monkeypatch.delitem(web.app.state.agent_uris, "", raising=False)
+
+    asyncio.run(web.startup_event())
+
+    assert web.get_agent_uri() == expected_agent
+
+
+def test_unauthorized_public_service_uri_returns_404_without_model_or_write(configured_client):
+    """Resolve a public-service URI through authorization instead of trusting it."""
+
+    client, llm, store = configured_client
 
     response = client.post(
         "/hh-rewrites",
-        json=request_payload(),
+        json=request_payload(
+            relationships={
+                "public-service": {
+                    "data": {
+                        "type": "public-services",
+                        "id": "http://data.lblod.info/id/public-services/other-organisation",
+                    }
+                }
+            }
+        ),
         headers={"content-type": "application/vnd.api+json"},
     )
 
-    assert response.status_code == 401
-    assert response.json()["errors"][0]["code"] == "session_required"
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["code"] == "public_service_not_found"
+    assert llm.calls == 0
     assert not store.writes
 
 
@@ -279,7 +348,7 @@ def test_post_rewrite_requires_a_session(configured_client):
         ),
         (
             {"content-type": "application/vnd.api+json"},
-            request_payload(attributes={"related-field": "http://purl.org/dc/terms/title"}),
+            request_payload(attributes={"related-field": "title"}),
             400,
             "invalid_related_field",
         ),

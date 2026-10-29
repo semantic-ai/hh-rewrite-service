@@ -25,6 +25,8 @@ class LLMConfig(BaseModel):
     api_key: str | None = None
     temperature: float = 0.1
     timeout: float = 30.0
+    # Context window in tokens; only local providers (Ollama) accept it.
+    num_ctx: int | None = None
 
 
 class LimitsConfig(BaseModel):
@@ -51,11 +53,60 @@ class PromptConfig(BaseModel):
     )
 
 
+class FieldLabel(BaseModel):
+    """Readable field name for a predicate, optionally scoped to a subject type."""
+
+    field: str
+    label: str
+    subject_type: str | None = None
+
+
+LPDC = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
+DCT = "http://purl.org/dc/terms/"
+M8G = "http://data.europa.eu/m8g/"
+CPSV = "http://purl.org/vocab/cpsv#"
+
+
+def _default_field_labels() -> list[FieldLabel]:
+    """Map LPDC subject types and predicates to the field names used in the guidelines."""
+
+    entries = [
+        (f"{LPDC}InstancePublicService", f"{DCT}title", "Producttitel"),
+        (f"{LPDC}InstancePublicService", f"{DCT}description", "Beschrijving"),
+        (f"{LPDC}InstancePublicService", f"{LPDC}additionalDescription", "Aanvullende beschrijving"),
+        (f"{LPDC}InstancePublicService", f"{LPDC}exception", "Uitzonderingen"),
+        (f"{LPDC}InstancePublicService", f"{LPDC}regulation", "Regelgeving"),
+        (f"{M8G}Requirement", f"{DCT}title", "Voorwaarden (tussentitel)"),
+        (f"{M8G}Requirement", f"{DCT}description", "Voorwaarden"),
+        (f"{M8G}Evidence", f"{DCT}title", "Bewijsstukken (tussentitel)"),
+        (f"{M8G}Evidence", f"{DCT}description", "Bewijsstukken"),
+        (f"{CPSV}Rule", f"{DCT}title", "Procedure (tussentitel)"),
+        (f"{CPSV}Rule", f"{DCT}description", "Procedure"),
+        (f"{M8G}Cost", f"{DCT}title", "Kosten (tussentitel)"),
+        (f"{M8G}Cost", f"{DCT}description", "Kosten"),
+        (f"{LPDC}FinancialAdvantage", f"{DCT}title", "Financiële voordelen (tussentitel)"),
+        (f"{LPDC}FinancialAdvantage", f"{DCT}description", "Financiële voordelen"),
+    ]
+    return [
+        FieldLabel(subject_type=subject_type, field=field, label=label)
+        for subject_type, field, label in entries
+    ]
+
+
 class RewriteConfig(BaseModel):
-    """Guideline identity and prompt configuration."""
+    """Guideline identity, prompt configuration and prompt-facing labels."""
 
     guideline_uri: str = "https://example.org/guidelines/hh/v3"
     prompt: PromptConfig = Field(default_factory=PromptConfig)
+    # Instance language variants mapped to the address form named in the guidelines.
+    address_forms: dict[str, str] = Field(
+        default_factory=lambda: {
+            "nl": "u-vorm",
+            "nl-be-x-formal": "u-vorm",
+            "nl-be-x-informal": "je-vorm",
+        }
+    )
+    field_labels: list[FieldLabel] = Field(default_factory=_default_field_labels)
 
 
 class ServiceConfig(BaseModel):

@@ -24,6 +24,7 @@ MU = "http://mu.semte.ch/vocabularies/core/"
 PROV = "http://www.w3.org/ns/prov#"
 EXT = "http://mu.semte.ch/vocabularies/ext/"
 DCT = "http://purl.org/dc/terms/"
+TASK = "http://redpencil.data.gift/vocabularies/tasks/"
 
 GENERATION_ACTIVITY = f"{LPDC}GenerationActivity"
 HAS_GENERATION_ACTIVITY = f"{LPDC}hasGenerationActivity"
@@ -76,12 +77,30 @@ class Store:
         }} LIMIT 1"""
         return _value(template_query(query), "variant")
 
+    def read_subject_types(self, subject_uri: str) -> list[str]:
+        """Read the RDF types of the resource that owns the rewritten field."""
+
+        query = f"""SELECT DISTINCT ?type WHERE {{
+            {sparql_escape_uri(subject_uri)} a ?type
+        }}"""
+        bindings = template_query(query).get("results", {}).get("bindings", [])
+        return [binding["type"]["value"] for binding in bindings if "type" in binding]
+
     def resolve_by_uuid(self, identifier: str, rdf_type: str) -> str | None:
         """Resolve a typed JSON:API identifier through authorization."""
 
         query = f"""SELECT ?resource WHERE {{
             ?resource a {sparql_escape_uri(rdf_type)} ;
                 <{MU}uuid> {sparql_escape(identifier)} .
+        }} LIMIT 1"""
+        return _value(template_query(query), "resource")
+
+    def resolve_by_uri(self, uri: str, rdf_type: str) -> str | None:
+        """Return the URI when the typed resource is visible through authorization."""
+
+        query = f"""SELECT ?resource WHERE {{
+            VALUES ?resource {{ {sparql_escape_uri(uri)} }}
+            ?resource a {sparql_escape_uri(rdf_type)} .
         }} LIMIT 1"""
         return _value(template_query(query), "resource")
 
@@ -163,6 +182,7 @@ class Store:
 
         activity_lines = [
             f"{sparql_escape_uri(activity_uri)} a <{PROV}Activity> ;",
+            f"    a <{TASK}Task> ;",
             f"    <{DCT}type> <{GENERATION_ACTIVITY}> ;",
             f"    <{MU}uuid> {sparql_escape(activity_uri.rsplit('/', 1)[-1])} ;",
             f"    <{LPDC}attemptNumber> {sparql_escape_int(attempt_number)} ;",

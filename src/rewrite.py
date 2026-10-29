@@ -105,9 +105,11 @@ def make_llm(config: ServiceConfig) -> Any:
             model=config.llm.model_name,
             base_url=config.llm.base_url,
             temperature=config.llm.temperature,
+            # Ollama silently truncates prompts beyond its small default window.
+            num_ctx=config.llm.num_ctx,
         )
         return LangChainLlmClient(model.with_structured_output(RewriteResult, include_raw=True))
-    
+
     if provider == "mistralai":
         from langchain_mistralai import ChatMistralAI
 
@@ -124,6 +126,25 @@ def make_llm(config: ServiceConfig) -> Any:
 # ---------------------------------------------------------------------------
 # Prompt and provider-output handling
 # ---------------------------------------------------------------------------
+
+
+def field_label(config: ServiceConfig, subject_types: list[str], field: str) -> str:
+    """Return the guideline field name for a predicate, or the URI when unmapped."""
+
+    labels = config.rewrite.field_labels
+    for entry in labels:
+        if entry.field == field and entry.subject_type in subject_types:
+            return entry.label
+    for entry in labels:
+        if entry.field == field and entry.subject_type is None:
+            return entry.label
+    return field
+
+
+def address_form_label(config: ServiceConfig, address_form: str) -> str:
+    """Return the guideline address form for a language variant, or the variant itself."""
+
+    return config.rewrite.address_forms.get(address_form, address_form)
 
 
 def assemble_prompt(
