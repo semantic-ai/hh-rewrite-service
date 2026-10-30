@@ -1,5 +1,9 @@
 # LPDC HH Rewrite Service
 
+The service uses the Flask-based `mu-python-template:feature-no-more-meinheld`
+image. The HTTP boundary is defined in `web.py`; the rewrite, persistence and
+provenance logic under `src/` is framework-agnostic.
+
 ## Overview
 
 This service turns an LPDC field value into a rewritten, guideline-aligned text suggestion for Heerlijk Helder (HH). It takes the original text, the owning public service and field, selects the configured rewrite guideline, asks the configured LLM to produce a better phrasing, and persists the result as a generation activity with provenance in the triplestore.
@@ -298,10 +302,13 @@ status (`notUsed` or `used`). The rewrite service does not write
 by mu-cl-resources; this service owns the rewrite action and writes the
 resulting activity and provenance data.
 
-When the container is running, open [http://localhost:8080/docs](http://localhost:8080/docs),
-select `POST /hh-rewrites`, click **Try it out**, and use the generated JSON:API example.
-The endpoint has one request-body parameter rather than separate Swagger fields because
-JSON:API sends all attributes and relationships in one document.
+The service does not publish generated OpenAPI documentation. Use the JSON:API
+example above with `POST /hh-rewrites`; for a local smoke test, send it with
+`curl` and the `application/vnd.api+json` content type. JSON:API sends all
+attributes and relationships in one request body.
+
+For development, the Flask template runs `flask --app web.py run --debug
+--port 80` when `MODE=development` is set.
 
 The request reaches the model and triplestore, so configure `LLM__API_KEY` when
 required by the selected provider and make sure mu-authorization and the
@@ -316,15 +323,26 @@ field generation the user cannot see resolves to a 404 before the model is
 called.
 
 At startup, the service waits until the triplestore answers a query without
-sudo and then registers its agent:
+sudo and then registers its agent. The framework-neutral implementation lives
+in [src/agent_registry.py](./src/agent_registry.py):
 
-- With `ALLOW_MU_AUTH_SUDO=true`, `write_agent_info` of
-  `decide-ai-service-base` registers a versioned agent linked to a hash of the
-  mounted configuration. This needs `COMPOSE_FILE`, `COMPOSE_SERVICE` and the
-  compose file mounted into the container.
+- With `ALLOW_MU_AUTH_SUDO=true`, the registry registers a versioned agent
+  linked to a hash of the mounted configuration. This needs `COMPOSE_FILE`,
+  `COMPOSE_SERVICE` and the compose file mounted into the container. The
+  registration graph defaults to `JOB_GRAPH`,
+  `http://mu.semte.ch/graphs/jobs`.
 - With `ALLOW_MU_AUTH_SUDO=false`, the service uses the fixed agent URI
   `http://lblod.data.gift/id/components/hh-rewrite/v1.0.0`. The deployment must
   create this agent before rewrite requests are handled.
+
+The registration URI bases can be overridden with `BASE_AGENT_URI` and
+`BASE_CONFIG_URI`. The compose source is selected with `COMPOSE_FILE` and
+`COMPOSE_SERVICE`; mounted paths matching `IGNORE_MOUNT_REGEX` are excluded
+from the configuration hash.
+
+Startup runs while the gunicorn worker boots, so the image sets
+`GUNICORN_CMD_ARGS="--timeout 120"`. Raise it in the deployment if the
+triplestore regularly takes longer to become available.
 
 Rewrite requests reference the registered URI in their provenance activity.
 
@@ -466,7 +484,7 @@ different model or Ollama endpoint is used, update both `llm.model_name` and
 
 With `ALLOW_MU_AUTH_SUDO: "true"`, the deployment mounts the Compose file and
 sets `COMPOSE_FILE` and `COMPOSE_SERVICE`. Those values allow startup to
-register the versioned agent through `decide-ai-service-base`. If the
+register the versioned agent through `src/agent_registry.py`. If the
 deployment creates the fixed agent and does not permit sudo, use
 `ALLOW_MU_AUTH_SUDO: "false"` instead.
 
@@ -493,7 +511,4 @@ types; see [Prompt labels](#prompt-labels) for the format.
 
 The runtime also needs both `MU_SPARQL_ENDPOINT` and
 `MU_SPARQL_UPDATEPOINT`. The service waits for a triplestore query to succeed
-before it accepts rewrite requests. When the deployment is running, the
-interactive API documentation is available at
-`http://localhost:8080/docs` when the deployment publishes the service on port
-8080.
+before it accepts rewrite requests.

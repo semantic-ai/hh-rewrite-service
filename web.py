@@ -7,20 +7,27 @@ mapping, dependency adapters and endpoint orchestration.
 
 from __future__ import annotations
 
+import builtins
+import json
 import logging
 import re
-import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
-from decide_ai_service_base.ai_logging import model_name_to_uri
-from decide_ai_service_base.util import app, get_agent_uri, write_agent_info
-from helpers import ALLOW_MU_AUTH_SUDO, query as template_query
+from flask import Blueprint, Response, request
+from pydantic import ValidationError
+from werkzeug.exceptions import HTTPException
 
+from src.agent_registry import (
+    ALLOW_MU_AUTH_SUDO,
+    get_agent_uri,
+    model_name_to_uri,
+    set_agent_uri,
+    wait_for_triplestore,
+    write_agent_info,
+)
 from src.config import ServiceConfig, get_config
 from src.rewrite import (
     RewriteProviderError,
@@ -36,8 +43,9 @@ from src.schema import (
     RewriteRequest,
     RewriteResponse,
 )
-from pydantic import ValidationError
-from src.store import Store
+
+if TYPE_CHECKING:
+    from src.store import Store
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +53,7 @@ from src.store import Store
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger("hh-rewrite-service")
-router = APIRouter()
+bp = Blueprint("hh_rewrite", __name__)
 AGENT_URI = "http://lblod.data.gift/id/components/hh-rewrite/v1.0.0"
 
 JSON_API_MEDIA_TYPE = "application/vnd.api+json"
@@ -55,100 +63,14 @@ RESOURCE_RDF_TYPES = {
     "field_generation": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration",
 }
 
-RELATIONSHIP_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "data": {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "required": ["type", "id"],
-                    "properties": {
-                        "type": {"type": "string"},
-                        "id": {"type": "string"},
-                    },
-                },
-                {"type": "null"},
-            ],
-        }
-    },
-}
-REQUEST_BODY_SCHEMA = {
-    "type": "object",
-    "required": ["data"],
-    "properties": {
-        "data": {
-            "type": "object",
-            "required": ["type", "attributes"],
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "example": "generation-activities",
-                },
-                "attributes": {
-                    "type": "object",
-                    "required": ["original-text", "related-subject", "related-field"],
-                    "properties": {
-                        "original-text": {
-                            "type": "string",
-                            "example": "De aanvrager dient het formulier in te vullen.",
-                        },
-                        "related-subject": {
-                            "type": "string",
-                            "format": "uri",
-                            "example": "http://data.lblod.info/id/procedures/456",
-                        },
-                        "related-field": {
-                            "type": "string",
-                            "format": "uri",
-                            "example": "http://purl.org/dc/terms/title",
-                        },
-                    },
-                },
-                "relationships": {
-                    "type": "object",
-                    "required": ["public-service"],
-                    "properties": {
-                        "public-service": RELATIONSHIP_SCHEMA,
-                        "field-generation": RELATIONSHIP_SCHEMA,
-                        "guideline": RELATIONSHIP_SCHEMA,
-                    },
-                },
-            },
-        }
-    },
-}
-
-
-def wait_for_triplestore() -> None:
-    """Block until the triplestore answers a query.
-
-    Mirrors decide_ai_service_base.util.wait_for_triplestore, which queries with
-    sudo. This service runs without ALLOW_MU_AUTH_SUDO, so it queries the
-    graphs readable without a session instead.
-    """
-
-    logger.info("Waiting for triplestore...")
-    while True:
-        try:
-            result = template_query("SELECT ?s WHERE { ?s ?p ?o . } LIMIT 1")
-            if result["results"]["bindings"]:
-                break
-        except Exception:
-            logger.info("Triplestore not live yet, retrying...")
-        time.sleep(1)
-    logger.info("Triplestore ready!")
-
-
-@app.on_event("startup")
-async def startup_event():
+def _startup() -> None:
     wait_for_triplestore()
     if ALLOW_MU_AUTH_SUDO:
         write_agent_info(AGENT_URI)
     else:
         # write_agent_info needs sudo to write the jobs graph; without it the
         # agent resource is seeded by a migration instead.
-        app.state.agent_uris[""] = AGENT_URI
+        set_agent_uri(AGENT_URI)
 
 
 def _new_uri(resource_type: str) -> str:
@@ -163,12 +85,17 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _error(status_code: int, code: str, detail: str) -> JSONResponse:
+def _json_api(status_code: int, content: dict[str, Any]) -> Response:
+    body = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+    return Response(body, status=status_code, mimetype=JSON_API_MEDIA_TYPE)
+
+
+def _error(status_code: int, code: str, detail: str) -> Response:
     """Return one JSON:API error response."""
 
-    return JSONResponse(
-        status_code=status_code,
-        content={
+    return _json_api(
+        status_code,
+        {
             "errors": [
                 {
                     "status": str(status_code),
@@ -178,8 +105,15 @@ def _error(status_code: int, code: str, detail: str) -> JSONResponse:
                 }
             ]
         },
-        media_type=JSON_API_MEDIA_TYPE,
     )
+
+
+@bp.app_errorhandler(HTTPException)
+def _http_error(error: HTTPException) -> Response:
+    """Return Flask routing errors such as 404 and 405 as JSON:API errors."""
+
+    code = (error.name or "http_error").lower().replace(" ", "_")
+    return _error(error.code or 500, code, error.description or "")
 
 
 # ---------------------------------------------------------------------------
@@ -187,14 +121,18 @@ def _error(status_code: int, code: str, detail: str) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-def get_llm(config: ServiceConfig = Depends(get_config)) -> Any:
-    """FastAPI dependency that creates the configured language-model client."""
+def get_llm() -> Any:
+    """Create the configured language-model client."""
 
-    return make_llm(config)
+    return make_llm(get_config())
 
 
 def get_store() -> Store:
-    """FastAPI dependency that builds the SPARQL store."""
+    """Build the SPARQL store."""
+
+    # Imported lazily: src.store needs the template's helpers modules, which
+    # only exist inside the image, while endpoint tests import web without them.
+    from src.store import Store
 
     return Store()
 
@@ -210,55 +148,20 @@ def get_agent() -> str:
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/hh-rewrites",
-    status_code=201,
-    openapi_extra={
-        "requestBody": {
-            "required": True,
-            "content": {
-                JSON_API_MEDIA_TYPE: {
-                    "schema": REQUEST_BODY_SCHEMA,
-                    "example": {
-                        "data": {
-                            "type": "generation-activities",
-                            "attributes": {
-                                "original-text": "De aanvrager dient het formulier in te vullen.",
-                                "related-subject": "http://data.lblod.info/id/procedures/456",
-                                "related-field": "http://purl.org/dc/terms/title",
-                            },
-                            "relationships": {
-                                "public-service": {
-                                    "data": {
-                                        "type": "public-services",
-                                        "id": "123",
-                                    }
-                                },
-                                "field-generation": {"data": None},
-                                "guideline": {"data": None},
-                            },
-                        }
-                    },
-                }
-            },
-        }
-    },
-)
-async def create_rewrite(
-    request: Request,
-    llm: Any = Depends(get_llm),
-    store: Store = Depends(get_store),
-    config: ServiceConfig = Depends(get_config),
-    agent_uri: str = Depends(get_agent),
-) -> JSONResponse:
+@bp.post("/hh-rewrites")
+async def create_rewrite() -> Response:
     """Run one rewrite, persist it and return the generated activity."""
 
     try:
+        llm = get_llm()
+        store = get_store()
+        config = get_config()
+        agent_uri = get_agent()
         if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != JSON_API_MEDIA_TYPE:
             return _error(415, "unsupported_media_type", "Content-Type must be application/vnd.api+json")
 
         try:
-            payload = RewriteRequest.model_validate(await request.json())
+            payload = RewriteRequest.model_validate(request.get_json(silent=True))
         except (ValueError, ValidationError):
             logger.debug("Invalid rewrite request")
             return _error(400, "invalid_request", "Request body is not valid JSON:API")
@@ -408,15 +311,19 @@ async def create_rewrite(
             ),
             included=[],
         )
-        return JSONResponse(
-            status_code=201,
-            content=response.model_dump(),
-            media_type=JSON_API_MEDIA_TYPE,
-        )
+        return _json_api(201, response.model_dump())
     except (RewriteProviderError, RewriteValidationError):
         logger.warning("Rewrite model call failed")
         return _error(504, "model_provider_error", "The rewrite model could not produce a response")
     except Exception:
         logger.error("Rewrite request failed")
         return _error(500, "rewrite_failed", "The rewrite request failed")
+
+
+# The template publishes its Flask app on builtins before importing this
+# module. Without it (e.g. unit tests mounting bp on their own app) there is
+# nothing to register on and no triplestore to wait for.
+if hasattr(builtins, "app"):
+    builtins.app.register_blueprint(bp)
+    _startup()
 
