@@ -27,6 +27,8 @@ class LLMConfig(BaseModel):
     timeout: float = 30.0
     # Context window in tokens; only local providers (Ollama) accept it.
     num_ctx: int | None = None
+    # Thinking mode for reasoning models (Ollama); None keeps the model default.
+    reasoning: bool | None = None
 
 
 class LimitsConfig(BaseModel):

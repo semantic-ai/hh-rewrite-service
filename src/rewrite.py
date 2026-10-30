@@ -82,6 +82,16 @@ class LangChainLlmClient:
         return result
 
 
+def _wrap_plain_output(message: Any) -> dict[str, Any]:
+    """Present a plain chat message like a structured-output result."""
+
+    return {
+        "raw": message,
+        "parsed": RewriteResult(generated_text=message.content),
+        "parsing_error": None,
+    }
+
+
 def make_llm(config: ServiceConfig) -> Any:
     """Build the configured provider client with structured output enabled."""
 
@@ -107,8 +117,14 @@ def make_llm(config: ServiceConfig) -> Any:
             temperature=config.llm.temperature,
             # Ollama silently truncates prompts beyond its small default window.
             num_ctx=config.llm.num_ctx,
+            # Hidden thinking makes structured output many times slower.
+            reasoning=config.llm.reasoning,
         )
-        return LangChainLlmClient(model.with_structured_output(RewriteResult, include_raw=True))
+        # JSON-schema output makes local models end the text early, so request
+        # plain text and wrap it in the same shape as with_structured_output.
+        from langchain_core.runnables import RunnableLambda
+
+        return LangChainLlmClient(model | RunnableLambda(_wrap_plain_output))
 
     if provider == "mistralai":
         from langchain_mistralai import ChatMistralAI
