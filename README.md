@@ -303,11 +303,11 @@ select `POST /hh-rewrites`, click **Try it out**, and use the generated JSON:API
 The endpoint has one request-body parameter rather than separate Swagger fields because
 JSON:API sends all attributes and relationships in one document.
 
-The request reaches the model and triplestore, so configure `LLM__API_KEY` and make
-sure mu-authorization and the development triplestore are running before using
-it. The development compose stack configures both `MU_SPARQL_ENDPOINT` and
-`MU_SPARQL_UPDATEPOINT` to `http://database:8890/sparql`; keep these variables
-set when deploying with the mu-python-template runtime.
+The request reaches the model and triplestore, so configure `LLM__API_KEY` when
+required by the selected provider and make sure mu-authorization and the
+triplestore are running before using it. Set both `MU_SPARQL_ENDPOINT` and
+`MU_SPARQL_UPDATEPOINT` to the SPARQL service address, for example
+`http://database:8890/sparql` when the services share a Compose network.
 
 
 Request handling never uses sudo. Every query carries the caller's session
@@ -322,13 +322,178 @@ sudo and then registers its agent:
   `decide-ai-service-base` registers a versioned agent linked to a hash of the
   mounted configuration. This needs `COMPOSE_FILE`, `COMPOSE_SERVICE` and the
   compose file mounted into the container.
-- Without sudo (the LPDC app), the service uses the fixed agent URI
-  `http://lblod.data.gift/id/components/hh-rewrite/v1.0.0`, which a migration
-  in the app stack creates.
+- With `ALLOW_MU_AUTH_SUDO=false`, the service uses the fixed agent URI
+  `http://lblod.data.gift/id/components/hh-rewrite/v1.0.0`. The deployment must
+  create this agent before rewrite requests are handled.
 
 Rewrite requests reference the registered URI in their provenance activity.
 
-## Compose
+## Deployment and configuration
+Define the service in the deployment stack that provides its mu-services,
+triplestore and network. This repository provides the service image definition
+and example configuration files; the deployment defines the Compose service.
 
-`docker compose up --build` starts the service container and a development Virtuoso instance. The FastAPI template image is pinned to the resolved multi-architecture digest in `Dockerfile`. Configure `LLM__API_KEY`, and use `LLM__PROVIDER`, `LLM__MODEL_NAME` and `LLM__BASE_URL` for the selected provider. The configured `gpt-6-luna` deployment only supports the default model temperature, so the example configuration uses `LLM__TEMPERATURE=1.0`.
-Virtuoso is exposed on host port `8890` for local SPARQL workbooks and tools.
+The container reads its configuration from `CONFIG_PATH`, which defaults to
+`/config/config.json`. Mount one of the repository's configuration files (or a
+configuration managed by the deployment) at that path, preferably
+read-only. The JSON configuration has three sections:
+
+| Section | Purpose |
+| --- | --- |
+| `llm` | Provider, model, endpoint, credentials, timeout and provider-specific options. |
+| `limits` | Maximum input length, maximum attempts and model-call retries. |
+| `rewrite` | Guideline URI, prompt templates and optional prompt-facing labels. |
+
+Nested configuration values can be overridden with environment variables using
+double underscores. Environment values are parsed as JSON when possible, so
+numbers and booleans should be passed as JSON values:
+
+```yaml
+environment:
+  CONFIG_PATH: /config/config.json
+  LLM__PROVIDER: mistralai
+  LLM__MODEL_NAME: mistral-small-2603
+  LLM__BASE_URL: https://api.example.com/v1
+  LLM__API_KEY: ${LLM_API_KEY}
+  LLM__TEMPERATURE: "1.0"
+  LLM__TIMEOUT: "30"
+  LIMITS__MAX_INPUT_LENGTH: "4000"
+  REWRITE__GUIDELINE_URI: https://example.org/guidelines/hh/v3
+```
+
+The environment override is applied after the JSON file is loaded. This makes
+it suitable for secrets and deployment-specific values, while keeping prompts,
+limits and model defaults in versioned configuration. Do not put API keys in a
+committed JSON file. `LLM__API_KEY` is only needed for providers that require
+authentication.
+
+### Hosted providers
+
+Mount a provider configuration and supply its secret through the environment.
+Adjust the source path when the deployment files and this repository are laid
+out differently:
+
+```yaml
+services:
+  rewrite:
+    image: semantic-ai/hh-rewrite-service:0.1.0
+    environment:
+      CONFIG_PATH: /config/config.json
+      ALLOW_MU_AUTH_SUDO: "false"
+      MU_SPARQL_ENDPOINT: http://database:8890/sparql
+      MU_SPARQL_UPDATEPOINT: http://database:8890/sparql
+      LOG_LEVEL: INFO
+      LLM__API_KEY: ${LLM_API_KEY}
+    volumes:
+      - ./config/config.json:/config/config.json:ro
+      - ./docker-compose.yml:/tmp/docker-compose.yaml:ro
+    depends_on:
+      database:
+        condition: service_healthy
+```
+
+
+
+### Ollama provider
+
+For a local model, use `config-ollama.json` and make the Ollama service
+available under the hostname `ollama`. The base URL must be the container
+address `http://ollama:11434`, not `http://localhost:11434`:
+
+```yaml
+services:
+  rewrite:
+    image: semantic-ai/hh-rewrite-service:0.1.0
+    build:
+      context: ../hh-rewrite-service
+    environment:
+      CONFIG_PATH: /config/config.json
+      COMPOSE_FILE: /tmp/docker-compose.yaml
+      COMPOSE_SERVICE: rewrite
+      ALLOW_MU_AUTH_SUDO: "true"
+      MU_SPARQL_ENDPOINT: http://database:8890/sparql
+      MU_SPARQL_UPDATEPOINT: http://database:8890/sparql
+      LOG_LEVEL: INFO
+    volumes:
+      - ./config/config-ollama.json:/config/config.json:ro
+      - ./docker-compose.yml:/tmp/docker-compose.yaml:ro
+    depends_on:
+      database:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:0.30.8
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_LOAD_TIMEOUT: "10m"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ollama-models:/root/.ollama/models
+    entrypoint:
+      - /bin/sh
+      - -c
+      - ollama serve & pid=$$! && sleep 5 && ollama pull gemma4:26b-a4b-it-qat && wait $$pid
+
+volumes:
+  ollama-models:
+```
+
+The matching `config-ollama.json` selects
+`gemma4:26b-a4b-it-qat`, sets `timeout` to 120 seconds and sets `num_ctx` to
+8192. `num_ctx` is passed only to Ollama and should be large enough to retain
+the guideline and input text in the prompt. This 26B model requires an NVIDIA
+GPU with Docker GPU support for practical response times. The Compose device
+reservation shown above is therefore required for the intended deployment;
+make sure the host has the NVIDIA Container Toolkit and a GPU with sufficient
+VRAM. CPU-only execution may work as a fallback, but performance will be very
+poor and requests can take an impractically long time. Use an equivalent GPU
+runtime only when adapting the deployment, and make sure the model can load
+within the available VRAM.
+
+The Ollama service pulls the model when it starts. Persist `/root/.ollama/models`
+in a named volume so restarts do not require downloading the model again. If a
+different model or Ollama endpoint is used, update both `llm.model_name` and
+`llm.base_url` in the mounted configuration, or override them with
+`LLM__MODEL_NAME` and `LLM__BASE_URL`.
+
+With `ALLOW_MU_AUTH_SUDO: "true"`, the deployment mounts the Compose file and
+sets `COMPOSE_FILE` and `COMPOSE_SERVICE`. Those values allow startup to
+register the versioned agent through `decide-ai-service-base`. If the
+deployment creates the fixed agent and does not permit sudo, use
+`ALLOW_MU_AUTH_SUDO: "false"` instead.
+
+### Guideline and prompt configuration
+
+Before sending a rewrite, the service reads `rewrite.guideline_uri` (or the
+request-specific guideline relationship) through the authorized SPARQL
+endpoint. The triplestore must already contain an `ext:Guideline` resource with
+`mu:uuid`, `dct:title` and `ext:guidelineText`; the service does not create
+guidelines. Set `REWRITE__GUIDELINE_URI` when the deployment uses a different
+guideline version.
+
+The `rewrite.prompt.system_message` and `rewrite.prompt.user_message` values
+are Python format templates. The user template can use `{field}`,
+`{address_form}`, `{guidelines}` and `{text}`. Keep the instruction to return
+only the rewritten text unless the integration intentionally handles additional
+model output.
+
+`rewrite.address_forms` and `rewrite.field_labels` replace the built-in
+defaults as complete values when supplied. Include every required entry in an
+override, not only the entry being changed. Field labels can be scoped with
+`subject_type` when the same predicate is used by different LPDC resource
+types; see [Prompt labels](#prompt-labels) for the format.
+
+The runtime also needs both `MU_SPARQL_ENDPOINT` and
+`MU_SPARQL_UPDATEPOINT`. The service waits for a triplestore query to succeed
+before it accepts rewrite requests. When the deployment is running, the
+interactive API documentation is available at
+`http://localhost:8080/docs` when the deployment publishes the service on port
+8080.
