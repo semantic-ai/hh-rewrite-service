@@ -52,11 +52,14 @@ def test_prompt_contains_field_guidelines_address_form_and_text() -> None:
         text="De aanvrager vult het formulier in.",
     )
 
-    prompt = "\n".join(message["content"] for message in messages)
-    assert "dct:title" in prompt
-    assert "nl-be-x-formal" in prompt
-    assert "Gebruik actieve zinnen." in prompt
-    assert "De aanvrager vult het formulier in." in prompt
+    system_message, user_message = (message["content"] for message in messages)
+    # Guidelines belong to the system message; the field text stays with the user.
+    assert "Gebruik actieve zinnen." in system_message
+    assert "Gebruik actieve zinnen." not in user_message
+    assert "dct:title" in user_message
+    assert "De aanvrager vult het formulier in." in user_message
+    # The address form is repeated so it opens and closes the user message.
+    assert user_message.count("nl-be-x-formal") == 2
 
 
 def test_field_label_uses_subject_type_to_disambiguate_predicates() -> None:

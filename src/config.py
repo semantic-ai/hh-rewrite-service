@@ -47,11 +47,27 @@ class PromptConfig(BaseModel):
         "Je herschrijft en verbetert veldteksten uitsluitend op taalkundig, "
         "stilistisch en structureel niveau, volgens de Heerlijk Helder-richtlijnen. "
         "Behoud elk feit, elke datum, elk bedrag, elke voorwaarde en de juridische betekenis. "
+        "Behoud elk feit, elke datum, elk bedrag, elke voorwaarde en de juridische betekenis.\n\n"
+        "Aanspreekvorm (strikte regel):\n"
+        "- Schrijf de volledige tekst in de aanspreekvorm die in het bericht "
+        "onder 'Aanhefvorm' staat.\n"
+        "- u-vorm: spreek de lezer aan met 'u' en 'uw' en gebruik de bijbehorende "
+        "werkwoordsvormen.\n"
+        "- je-vorm: spreek de lezer aan met 'je', 'jij' en 'jouw' en gebruik de "
+        "bijbehorende werkwoordsvormen.\n"
+        "- Meng de twee vormen nooit, ook niet binnen één zin, opsomming of titel.\n"
+        "- Vervang afstandelijke verwijzingen zoals 'de aanvrager' of 'de burger' door "
+        "een directe aanspreking van de lezer, tenzij het echt over een derde partij gaat.\n\n"
+        "Richtlijnen:\n{guidelines}\n\n"
         "Geef uitsluitend de herschreven tekst terug."
     )
     user_message: str = (
         "Veld: {field}\nAanhefvorm: {address_form}\nRichtlijnen:\n{guidelines}\n\n"
         "Tekst:\n{text}"
+        "Veld: {field}\nAanhefvorm: {address_form}\n\n"
+        "Tekst:\n{text}\n\n"
+        "Herschrijf de tekst hierboven volgens de richtlijnen en schrijf "
+        "consequent in de {address_form}."
     )
 
 
