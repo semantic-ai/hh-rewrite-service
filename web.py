@@ -59,7 +59,7 @@ AGENT_URI = "http://lblod.data.gift/id/components/hh-rewrite/v1.0.0"
 JSON_API_MEDIA_TYPE = "application/vnd.api+json"
 
 RESOURCE_RDF_TYPES = {
-    "public_service": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService",
+    "public_service": "http://data.lblod.info/vocabularies/lpdc/#InstancePublicService",
     "field_generation": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration",
 }
 

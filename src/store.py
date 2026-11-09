@@ -19,7 +19,8 @@ from helpers import query as template_query, update as template_update
 # ---------------------------------------------------------------------------
 
 
-LPDC = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
+LPDCEXT = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
+LPDC = "http://data.lblod.info/vocabularies/lpdc/"
 MU = "http://mu.semte.ch/vocabularies/core/"
 PROV = "http://www.w3.org/ns/prov#"
 EXT = "http://mu.semte.ch/vocabularies/ext/"
@@ -73,7 +74,7 @@ class Store:
         """Read the Dutch address form configured for a public service."""
 
         query = f"""SELECT ?variant WHERE {{
-            {sparql_escape_uri(public_service_uri)} <{LPDC}dutchLanguageVariant> ?variant
+            {sparql_escape_uri(public_service_uri)} <{LPDCEXT}dutchLanguageVariant> ?variant
         }} LIMIT 1"""
         return _value(template_query(query), "variant")
 

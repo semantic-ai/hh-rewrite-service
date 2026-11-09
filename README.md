@@ -67,7 +67,7 @@ Setting either key in `config.json` replaces the built-in defaults in
 
 The service stores one stable field-generation resource and one generation
 activity for every rewrite. The activity is typed as `prov:Activity` and has
-`dct:type lpdcExt:GenerationActivity`. It contains the attempt number, source
+`dct:type lpdc:GenerationActivity`. It contains the attempt number, source
 text, generated text and review status, and records the model invocation and
 links to the selected guideline and agent. An `ext:AICall` resource records
 the provider call details when model metadata is
@@ -77,7 +77,8 @@ The prefixes currently used by the writer are:
 
 | Prefix | Namespace | Use |
 | --- | --- | --- |
-| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | Field-generation and generation-activity terms. |
+| `lpdc` | `http://data.lblod.info/vocabularies/lpdc/` | Field-generation and generation-activity terms. |
+| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | IPDC-LPDC |
 | `mu` | `http://mu.semte.ch/vocabularies/core/` | Shared UUID values. |
 | `prov` | `http://www.w3.org/ns/prov#` | Activity and provenance relationships. |
 | `ext` | `http://mu.semte.ch/vocabularies/ext/` | Guideline and AI-call metadata owned by the shared service conventions. |
@@ -87,8 +88,8 @@ The main resources and predicates are:
 
 | Resource | Predicates written by this service |
 | --- | --- |
-| `lpdcExt:FieldGeneration` | `lpdcExt:relatedSubject`, `lpdcExt:relatedField`, `lpdcExt:fieldGenerationInstance`, `mu:uuid` |
-| `prov:Activity` with `dct:type lpdcExt:GenerationActivity` | `lpdcExt:attemptNumber`, `lpdcExt:originalText`, `lpdcExt:generatedText`, `lpdcExt:status`, `lpdcExt:hasGenerationActivity`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
+| `lpdc:FieldGeneration` | `lpdc:relatedSubject`, `lpdc:relatedField`, `lpdc:fieldGenerationInstance`, `mu:uuid` |
+| `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `lpdc:status`, `lpdc:hasGenerationActivity`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
 | `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall` |
 
 The guideline is read as an existing `ext:Guideline` resource. Its required
@@ -100,18 +101,18 @@ For example, one stored generation activity has this shape:
 ```turtle
 @prefix dct: <http://purl.org/dc/terms/> .
 @prefix ext: <http://mu.semte.ch/vocabularies/ext/> .
-@prefix lpdcExt: <https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#> .
+@prefix lpdc: <http://data.lblod.info/vocabularies/lpdc/>
 @prefix mu: <http://mu.semte.ch/vocabularies/core/> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 <http://data.lblod.info/id/generation-activities/example>
     a prov:Activity ;
   mu:uuid "example" ;
-  dct:type lpdcExt:GenerationActivity ;
-  lpdcExt:attemptNumber 1 ;
-  lpdcExt:originalText "De aanvrager dient het formulier in te vullen." ;
-  lpdcExt:generatedText "Vul het formulier in." ;
-  lpdcExt:status lpdcExt:notUsed ;
-  lpdcExt:hasGenerationActivity <http://data.lblod.info/id/field-generations/example> ;
+  dct:type lpdc:GenerationActivity ;
+  lpdc:attemptNumber 1 ;
+  lpdc:originalText "De aanvrager dient het formulier in te vullen." ;
+  lpdc:generatedText "Vul het formulier in." ;
+  lpdc:status lpdc:notUsed ;
+  lpdc:hasGenerationActivity <http://data.lblod.info/id/field-generations/example> ;
     prov:wasAssociatedWith <http://lblod.data.gift/id/components/hh-rewrite/v1.0.0> ;
     prov:used <https://example.org/guidelines/hh/v3> ;
     ext:addressForm "nl-be-x-formal" ;

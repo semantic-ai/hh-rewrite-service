@@ -65,14 +65,14 @@ class FakeStore:
     def resolve_by_uuid(self, identifier, rdf_type):
         resources = {
             ("123", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"): PUBLIC_SERVICE,
-            ("1", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration"): FIELD_GENERATION,
+            ("1", "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"): FIELD_GENERATION,
         }
         return resources.get((identifier, rdf_type))
 
     def resolve_by_uri(self, uri, rdf_type):
         resources = {
             (PUBLIC_SERVICE, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"),
-            (FIELD_GENERATION, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration"),
+            (FIELD_GENERATION, "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"),
         }
         return uri if (uri, rdf_type) in resources else None
 
