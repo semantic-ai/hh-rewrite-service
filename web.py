@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, Response, request
 from pydantic import ValidationError
+from store import NOT_USED
 from werkzeug.exceptions import HTTPException
 
 from src.agent_registry import (
@@ -71,12 +72,6 @@ def _startup() -> None:
         # write_agent_info needs sudo to write the jobs graph; without it the
         # agent resource is seeded by a migration instead.
         set_agent_uri(AGENT_URI)
-
-
-def _new_uri(resource_type: str) -> str:
-    """Create a new URI in the shared data namespace."""
-
-    return f"http://data.lblod.info/id/{resource_type}/{uuid.uuid4()}"
 
 
 def _iso(value: datetime) -> str:
@@ -261,7 +256,8 @@ async def create_rewrite() -> Response:
         ended_at = datetime.now(timezone.utc)
 
         # Store the generated text and provenance as one domain operation.
-        activity_uri = _new_uri("generation-activities")
+        activity_uuid = str(uuid.uuid4())
+        activity_uri = f"http://data.lblod.info/id/generation-activities/{activity_uuid}"
 
         store.write_generation_activity(
             activity_uri=activity_uri,
@@ -280,11 +276,11 @@ async def create_rewrite() -> Response:
             tokens_out=usage.tokens_out,
             duration=usage.duration,
         )
-        
+
         response = RewriteResponse(
             data=Resource(
                 type="generation-activities",
-                id=activity_uri,
+                id=activity_uuid,
                 attributes=ActivityAttributes(
                     uri=activity_uri,
                     **{
@@ -296,7 +292,7 @@ async def create_rewrite() -> Response:
                         "model": config.llm.model_name,
                         "address-form": address_form,
                         "language": "nl",
-                        "status": "notUsed",
+                        "status": NOT_USED,
                     },
                 ).model_dump(by_alias=True),
                 relationships={

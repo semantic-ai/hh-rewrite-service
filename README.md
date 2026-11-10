@@ -89,7 +89,7 @@ The main resources and predicates are:
 | Resource | Predicates written by this service |
 | --- | --- |
 | `lpdc:FieldGeneration` | `lpdc:relatedSubject`, `lpdc:relatedField`, `lpdc:fieldGenerationInstance`, `mu:uuid` |
-| `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `lpdc:status`, `lpdc:hasGenerationActivity`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
+| `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `adms:status`, `lpdc:hasGenerationActivity`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
 | `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall` |
 
 The guideline is read as an existing `ext:Guideline` resource. Its required

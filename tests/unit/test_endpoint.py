@@ -6,6 +6,7 @@ import pytest
 from flask import Flask
 
 import src.agent_registry as registry
+from store import NOT_USED
 import web
 from src.config import ServiceConfig
 from web import bp, get_agent, get_config, get_llm, get_store
@@ -154,7 +155,7 @@ def test_post_rewrite_returns_generation_activity(configured_client):
     assert response.headers["content-type"].startswith("application/vnd.api+json")
     assert body["data"]["type"] == "generation-activities"
     assert body["data"]["attributes"]["generated-text"] == "Vul het formulier in."
-    assert body["data"]["attributes"]["status"] == "notUsed"
+    assert body["data"]["attributes"]["status"] == NOT_USED
     assert body["data"]["relationships"]["field-generation"]["data"]["type"] == "field-generations"
     assert body["included"] == []
     assert len(store.writes) == 1

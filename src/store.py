@@ -26,10 +26,11 @@ PROV = "http://www.w3.org/ns/prov#"
 EXT = "http://mu.semte.ch/vocabularies/ext/"
 DCT = "http://purl.org/dc/terms/"
 TASK = "http://redpencil.data.gift/vocabularies/tasks/"
+ADMS = "http://www.w3.org/ns/adms#"
 
 GENERATION_ACTIVITY = f"{LPDC}GenerationActivity"
 HAS_GENERATION_ACTIVITY = f"{LPDC}hasGenerationActivity"
-NOT_USED = f"{LPDC}notUsed"
+NOT_USED = "http://lblod.data.gift/concepts/0ec7b4a8-c281-4ff7-8b50-c02063a1e0dc"
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +190,7 @@ class Store:
             f"    <{LPDC}attemptNumber> {sparql_escape_int(attempt_number)} ;",
             f"    <{LPDC}originalText> {sparql_escape(original_text)} ;",
             f"    <{LPDC}generatedText> {sparql_escape(generated_text)} ;",
-            f"    <{LPDC}status> <{NOT_USED}> ;",
+            f"    <{ADMS}status> <{NOT_USED}> ;",
             f"    <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;",
             f"    <{PROV}startedAtTime> {sparql_escape(started_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}endedAtTime> {sparql_escape(ended_at.astimezone(timezone.utc))} ;",
