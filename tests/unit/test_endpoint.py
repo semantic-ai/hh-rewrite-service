@@ -6,8 +6,8 @@ import pytest
 from flask import Flask
 
 import src.agent_registry as registry
-from store import NOT_USED
 import web
+from src.constants import NOT_USED
 from src.config import ServiceConfig
 from web import bp, get_agent, get_config, get_llm, get_store
 

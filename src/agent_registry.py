@@ -20,15 +20,10 @@ from typing import Any
 
 import yaml
 
+from .constants import EXT, FOAF, MU, PROV, SCHEMA, TCS
+
 
 logger = logging.getLogger("hh-rewrite-service.agent-registry")
-
-EXT = "http://mu.semte.ch/vocabularies/ext/"
-FOAF = "http://xmlns.com/foaf/0.1/"
-MU = "http://mu.semte.ch/vocabularies/core/"
-PROV = "http://www.w3.org/ns/prov#"
-SCHEMA = "https://schema.org/"
-TCS = "https://w3id.org/tcs#"
 
 JOB_GRAPH = os.getenv("JOB_GRAPH", "http://mu.semte.ch/graphs/jobs")
 BASE_AGENT_URI = os.getenv("BASE_AGENT_URI", "http://lblod.data.gift/id/components/")

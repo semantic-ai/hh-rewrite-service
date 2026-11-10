@@ -13,24 +13,20 @@ from datetime import datetime, timezone
 from escape_helpers import sparql_escape, sparql_escape_float, sparql_escape_int, sparql_escape_uri
 from helpers import query as template_query, update as template_update
 
-
-# ---------------------------------------------------------------------------
-# Vocabulary constants
-# ---------------------------------------------------------------------------
-
-
-LPDCEXT = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
-LPDC = "http://data.lblod.info/vocabularies/lpdc/"
-MU = "http://mu.semte.ch/vocabularies/core/"
-PROV = "http://www.w3.org/ns/prov#"
-EXT = "http://mu.semte.ch/vocabularies/ext/"
-DCT = "http://purl.org/dc/terms/"
-TASK = "http://redpencil.data.gift/vocabularies/tasks/"
-ADMS = "http://www.w3.org/ns/adms#"
-
-GENERATION_ACTIVITY = f"{LPDC}GenerationActivity"
-HAS_GENERATION_ACTIVITY = f"{LPDC}hasGenerationActivity"
-NOT_USED = "http://lblod.data.gift/concepts/0ec7b4a8-c281-4ff7-8b50-c02063a1e0dc"
+from .constants import (
+    ADMS,
+    DATA_URI_BASE,
+    DCT,
+    EXT,
+    GENERATION_ACTIVITY,
+    HAS_GENERATION_ACTIVITY,
+    LPDC,
+    LPDCEXT,
+    MU,
+    NOT_USED,
+    PROV,
+    TASK,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +37,7 @@ NOT_USED = "http://lblod.data.gift/concepts/0ec7b4a8-c281-4ff7-8b50-c02063a1e0dc
 def _uuid_uri(prefix: str) -> str:
     """Create a new data URI for a generated LPDC resource."""
 
-    return f"http://data.lblod.info/id/{prefix}/{uuid.uuid4()}"
+    return f"{DATA_URI_BASE}{prefix}/{uuid.uuid4()}"
 
 
 def _value(result: dict, key: str) -> str | None:

@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .constants import CPSV, DCT, LPDCEXT, M8G
+
 
 # ---------------------------------------------------------------------------
 # Configuration models
@@ -77,12 +79,6 @@ class FieldLabel(BaseModel):
     field: str
     label: str
     subject_type: str | None = None
-
-
-LPDCEXT = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
-DCT = "http://purl.org/dc/terms/"
-M8G = "http://data.europa.eu/m8g/"
-CPSV = "http://purl.org/vocab/cpsv#"
 
 
 def _default_field_labels() -> list[FieldLabel]:
