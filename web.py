@@ -180,8 +180,8 @@ async def create_rewrite() -> Response:
 
         if not original_text.strip():
             return _error(422, "empty_text", "original-text must not be empty")
-        if re.search(r"<\s*/?\s*[A-Za-z][^>]*>", original_text):
-            return _error(422, "markup_not_allowed", "original-text must not contain markup")
+        # if re.search(r"<\s*/?\s*[A-Za-z][^>]*>", original_text):
+        #     return _error(422, "markup_not_allowed", "original-text must not contain markup")
         if len(original_text) > config.limits.max_input_length:
             return _error(413, "input_too_large", "original-text exceeds the configured maximum length")
 
