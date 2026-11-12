@@ -57,7 +57,11 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
     assert "a <http://www.w3.org/ns/prov#Activity>" in updates[0]
     assert "http://data.lblod.info/vocabularies/lpdc/GenerationActivity" in updates[0]
     assert f"<http://www.w3.org/ns/adms#status> <{NOT_USED}>" in updates[0]
-    assert "http://data.lblod.info/vocabularies/lpdc/hasGenerationActivity" in updates[0]
+    assert (
+        "<http://example.org/generation/1> "
+        "<http://data.lblod.info/vocabularies/lpdc/hasGenerationActivity> "
+        "<http://example.org/activity/1> ."
+    ) in updates[0]
     assert 'Origineel \\\"tekst\\\" \\\\\\"' in updates[0]
     assert "hasConfig" not in updates[0]
     assert "configHash" not in updates[0]

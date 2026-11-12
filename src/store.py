@@ -146,9 +146,9 @@ class Store:
         """Return the next sequential attempt number for a field generation."""
 
         query = f"""SELECT (MAX(?number) AS ?max) WHERE {{
+            {sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> ?activity .
             ?activity a <{PROV}Activity> ;
                 <{DCT}type> <{GENERATION_ACTIVITY}> ;
-                <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;
                 <{LPDC}attemptNumber> ?number .
         }}"""
         maximum = _value(template_query(query), "max")
@@ -187,13 +187,13 @@ class Store:
             f"    <{LPDC}originalText> {sparql_escape(original_text)} ;",
             f"    <{LPDC}generatedText> {sparql_escape(generated_text)} ;",
             f"    <{ADMS}status> <{NOT_USED}> ;",
-            f"    <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;",
             f"    <{PROV}startedAtTime> {sparql_escape(started_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}endedAtTime> {sparql_escape(ended_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}wasAssociatedWith> {sparql_escape_uri(agent_uri)} ;",
             f"    <{PROV}used> {sparql_escape_uri(guideline_uri)} ;",
             f"    <{EXT}addressForm> {sparql_escape(address_form)} ;",
             f"    <{DCT}language> {sparql_escape('nl')} .",
+            f"{sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(activity_uri)} .",
         ]
 
         if model_uri:

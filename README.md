@@ -88,8 +88,8 @@ The main resources and predicates are:
 
 | Resource | Predicates written by this service |
 | --- | --- |
-| `lpdc:FieldGeneration` | `lpdc:relatedSubject`, `lpdc:relatedField`, `lpdc:fieldGenerationInstance`, `mu:uuid` |
-| `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `adms:status`, `lpdc:hasGenerationActivity`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
+| `lpdc:FieldGeneration` | `lpdc:relatedSubject`, `lpdc:relatedField`, `lpdc:fieldGenerationInstance`, `lpdc:hasGenerationActivity` (one per attempt), `mu:uuid` |
+| `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `adms:status`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
 | `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall` |
 
 The guideline is read as an existing `ext:Guideline` resource. Its required
@@ -101,9 +101,14 @@ For example, one stored generation activity has this shape:
 ```turtle
 @prefix dct: <http://purl.org/dc/terms/> .
 @prefix ext: <http://mu.semte.ch/vocabularies/ext/> .
-@prefix lpdc: <http://data.lblod.info/vocabularies/lpdc/>
+@prefix lpdc: <http://data.lblod.info/vocabularies/lpdc/> .
 @prefix mu: <http://mu.semte.ch/vocabularies/core/> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix adms: <http://www.w3.org/ns/adms#> .
+
+<http://data.lblod.info/id/generations/example>
+  lpdc:hasGenerationActivity <http://data.lblod.info/id/generation-activities/example> .
+
 <http://data.lblod.info/id/generation-activities/example>
     a prov:Activity ;
   mu:uuid "example" ;
@@ -111,8 +116,7 @@ For example, one stored generation activity has this shape:
   lpdc:attemptNumber 1 ;
   lpdc:originalText "De aanvrager dient het formulier in te vullen." ;
   lpdc:generatedText "Vul het formulier in." ;
-  lpdc:status lpdc:notUsed ;
-  lpdc:hasGenerationActivity <http://data.lblod.info/id/field-generations/example> ;
+  adms:status <http://lblod.data.gift/concepts/0ec7b4a8-c281-4ff7-8b50-c02063a1e0dc> ; # Niet gebruikt
     prov:wasAssociatedWith <http://lblod.data.gift/id/components/hh-rewrite/v1.0.0> ;
     prov:used <https://example.org/guidelines/hh/v3> ;
     ext:addressForm "nl-be-x-formal" ;
