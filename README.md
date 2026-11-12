@@ -335,7 +335,7 @@ in [src/agent_registry.py](./src/agent_registry.py):
   linked to a hash of the mounted configuration. This needs `COMPOSE_FILE`,
   `COMPOSE_SERVICE` and the compose file mounted into the container. The
   registration graph defaults to `JOB_GRAPH`,
-  `http://mu.semte.ch/graphs/jobs`.
+  `http://mu.semte.ch/graphs/system/jobs`.
 - With `ALLOW_MU_AUTH_SUDO=false`, the service uses the fixed agent URI
   `http://lblod.data.gift/id/components/hh-rewrite/v1.0.0`. The deployment must
   create this agent before rewrite requests are handled.

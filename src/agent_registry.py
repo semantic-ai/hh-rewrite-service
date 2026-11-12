@@ -25,7 +25,7 @@ from .constants import EXT, FOAF, MU, PROV, SCHEMA, TCS
 
 logger = logging.getLogger("hh-rewrite-service.agent-registry")
 
-JOB_GRAPH = os.getenv("JOB_GRAPH", "http://mu.semte.ch/graphs/jobs")
+JOB_GRAPH = os.getenv("JOB_GRAPH", "http://mu.semte.ch/graphs/system/jobs")
 BASE_AGENT_URI = os.getenv("BASE_AGENT_URI", "http://lblod.data.gift/id/components/")
 BASE_CONFIG_URI = os.getenv("BASE_CONFIG_URI", "http://lblod.data.gift/id/configurations/")
 COMPOSE_FILE = os.getenv("COMPOSE_FILE", "docker-compose.yaml")
