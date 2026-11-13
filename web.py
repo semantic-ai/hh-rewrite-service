@@ -254,7 +254,7 @@ async def create_rewrite() -> Response:
 
         # Store the generated text and provenance as one domain operation.
         activity_uuid = str(uuid.uuid4())
-        activity_uri = f"{DATA_URI_BASE}/generation-activities/{activity_uuid}"
+        activity_uri = f"{DATA_URI_BASE}generation-activities/{activity_uuid}"
 
         store.write_generation_activity(
             activity_uri=activity_uri,
