@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .constants import CPSV, DCT, LPDCEXT, M8G
+
 
 # ---------------------------------------------------------------------------
 # Configuration models
@@ -79,21 +81,15 @@ class FieldLabel(BaseModel):
     subject_type: str | None = None
 
 
-LPDC = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
-DCT = "http://purl.org/dc/terms/"
-M8G = "http://data.europa.eu/m8g/"
-CPSV = "http://purl.org/vocab/cpsv#"
-
-
 def _default_field_labels() -> list[FieldLabel]:
     """Map LPDC subject types and predicates to the field names used in the guidelines."""
 
     entries = [
-        (f"{LPDC}InstancePublicService", f"{DCT}title", "Producttitel"),
-        (f"{LPDC}InstancePublicService", f"{DCT}description", "Beschrijving"),
-        (f"{LPDC}InstancePublicService", f"{LPDC}additionalDescription", "Aanvullende beschrijving"),
-        (f"{LPDC}InstancePublicService", f"{LPDC}exception", "Uitzonderingen"),
-        (f"{LPDC}InstancePublicService", f"{LPDC}regulation", "Regelgeving"),
+        (f"{LPDCEXT}InstancePublicService", f"{DCT}title", "Producttitel"),
+        (f"{LPDCEXT}InstancePublicService", f"{DCT}description", "Beschrijving"),
+        (f"{LPDCEXT}InstancePublicService", f"{LPDCEXT}additionalDescription", "Aanvullende beschrijving"),
+        (f"{LPDCEXT}InstancePublicService", f"{LPDCEXT}exception", "Uitzonderingen"),
+        (f"{LPDCEXT}InstancePublicService", f"{LPDCEXT}regulation", "Regelgeving"),
         (f"{M8G}Requirement", f"{DCT}title", "Voorwaarden (tussentitel)"),
         (f"{M8G}Requirement", f"{DCT}description", "Voorwaarden"),
         (f"{M8G}Evidence", f"{DCT}title", "Bewijsstukken (tussentitel)"),
@@ -102,8 +98,8 @@ def _default_field_labels() -> list[FieldLabel]:
         (f"{CPSV}Rule", f"{DCT}description", "Procedure"),
         (f"{M8G}Cost", f"{DCT}title", "Kosten (tussentitel)"),
         (f"{M8G}Cost", f"{DCT}description", "Kosten"),
-        (f"{LPDC}FinancialAdvantage", f"{DCT}title", "Financiële voordelen (tussentitel)"),
-        (f"{LPDC}FinancialAdvantage", f"{DCT}description", "Financiële voordelen"),
+        (f"{LPDCEXT}FinancialAdvantage", f"{DCT}title", "Financiële voordelen (tussentitel)"),
+        (f"{LPDCEXT}FinancialAdvantage", f"{DCT}description", "Financiële voordelen"),
     ]
     return [
         FieldLabel(subject_type=subject_type, field=field, label=label)

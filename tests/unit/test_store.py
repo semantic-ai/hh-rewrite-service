@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 import src.store as store_module
+from src.constants import NOT_USED
 from src.store import Store
 
 
@@ -54,9 +55,13 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
     assert len(updates) == 1
     assert updates[0].startswith("INSERT DATA")
     assert "a <http://www.w3.org/ns/prov#Activity>" in updates[0]
-    assert "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#GenerationActivity" in updates[0]
-    assert "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#notUsed" in updates[0]
-    assert "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#hasGenerationActivity" in updates[0]
+    assert "http://data.lblod.info/vocabularies/lpdc/GenerationActivity" in updates[0]
+    assert f"<http://www.w3.org/ns/adms#status> <{NOT_USED}>" in updates[0]
+    assert (
+        "<http://example.org/generation/1> "
+        "<http://data.lblod.info/vocabularies/lpdc/hasGenerationActivity> "
+        "<http://example.org/activity/1> ."
+    ) in updates[0]
     assert 'Origineel \\\"tekst\\\" \\\\\\"' in updates[0]
     assert "hasConfig" not in updates[0]
     assert "configHash" not in updates[0]

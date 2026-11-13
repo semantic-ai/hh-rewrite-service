@@ -7,6 +7,7 @@ from flask import Flask
 
 import src.agent_registry as registry
 import web
+from src.constants import NOT_USED
 from src.config import ServiceConfig
 from web import bp, get_agent, get_config, get_llm, get_store
 
@@ -65,14 +66,14 @@ class FakeStore:
     def resolve_by_uuid(self, identifier, rdf_type):
         resources = {
             ("123", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"): PUBLIC_SERVICE,
-            ("1", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration"): FIELD_GENERATION,
+            ("1", "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"): FIELD_GENERATION,
         }
         return resources.get((identifier, rdf_type))
 
     def resolve_by_uri(self, uri, rdf_type):
         resources = {
             (PUBLIC_SERVICE, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"),
-            (FIELD_GENERATION, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration"),
+            (FIELD_GENERATION, "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"),
         }
         return uri if (uri, rdf_type) in resources else None
 
@@ -154,7 +155,7 @@ def test_post_rewrite_returns_generation_activity(configured_client):
     assert response.headers["content-type"].startswith("application/vnd.api+json")
     assert body["data"]["type"] == "generation-activities"
     assert body["data"]["attributes"]["generated-text"] == "Vul het formulier in."
-    assert body["data"]["attributes"]["status"] == "notUsed"
+    assert body["data"]["attributes"]["status"] == NOT_USED
     assert body["data"]["relationships"]["field-generation"]["data"]["type"] == "field-generations"
     assert body["included"] == []
     assert len(store.writes) == 1

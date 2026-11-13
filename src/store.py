@@ -13,22 +13,20 @@ from datetime import datetime, timezone
 from escape_helpers import sparql_escape, sparql_escape_float, sparql_escape_int, sparql_escape_uri
 from helpers import query as template_query, update as template_update
 
-
-# ---------------------------------------------------------------------------
-# Vocabulary constants
-# ---------------------------------------------------------------------------
-
-
-LPDC = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
-MU = "http://mu.semte.ch/vocabularies/core/"
-PROV = "http://www.w3.org/ns/prov#"
-EXT = "http://mu.semte.ch/vocabularies/ext/"
-DCT = "http://purl.org/dc/terms/"
-TASK = "http://redpencil.data.gift/vocabularies/tasks/"
-
-GENERATION_ACTIVITY = f"{LPDC}GenerationActivity"
-HAS_GENERATION_ACTIVITY = f"{LPDC}hasGenerationActivity"
-NOT_USED = f"{LPDC}notUsed"
+from .constants import (
+    ADMS,
+    DATA_URI_BASE,
+    DCT,
+    EXT,
+    GENERATION_ACTIVITY,
+    HAS_GENERATION_ACTIVITY,
+    LPDC,
+    LPDCEXT,
+    MU,
+    NOT_USED,
+    PROV,
+    TASK,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +37,7 @@ NOT_USED = f"{LPDC}notUsed"
 def _uuid_uri(prefix: str) -> str:
     """Create a new data URI for a generated LPDC resource."""
 
-    return f"http://data.lblod.info/id/{prefix}/{uuid.uuid4()}"
+    return f"{DATA_URI_BASE}{prefix}/{uuid.uuid4()}"
 
 
 def _value(result: dict, key: str) -> str | None:
@@ -73,7 +71,7 @@ class Store:
         """Read the Dutch address form configured for a public service."""
 
         query = f"""SELECT ?variant WHERE {{
-            {sparql_escape_uri(public_service_uri)} <{LPDC}dutchLanguageVariant> ?variant
+            {sparql_escape_uri(public_service_uri)} <{LPDCEXT}dutchLanguageVariant> ?variant
         }} LIMIT 1"""
         return _value(template_query(query), "variant")
 
@@ -148,9 +146,9 @@ class Store:
         """Return the next sequential attempt number for a field generation."""
 
         query = f"""SELECT (MAX(?number) AS ?max) WHERE {{
+            {sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> ?activity .
             ?activity a <{PROV}Activity> ;
                 <{DCT}type> <{GENERATION_ACTIVITY}> ;
-                <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;
                 <{LPDC}attemptNumber> ?number .
         }}"""
         maximum = _value(template_query(query), "max")
@@ -188,14 +186,14 @@ class Store:
             f"    <{LPDC}attemptNumber> {sparql_escape_int(attempt_number)} ;",
             f"    <{LPDC}originalText> {sparql_escape(original_text)} ;",
             f"    <{LPDC}generatedText> {sparql_escape(generated_text)} ;",
-            f"    <{LPDC}status> <{NOT_USED}> ;",
-            f"    <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(field_generation_uri)} ;",
+            f"    <{ADMS}status> <{NOT_USED}> ;",
             f"    <{PROV}startedAtTime> {sparql_escape(started_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}endedAtTime> {sparql_escape(ended_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}wasAssociatedWith> {sparql_escape_uri(agent_uri)} ;",
             f"    <{PROV}used> {sparql_escape_uri(guideline_uri)} ;",
             f"    <{EXT}addressForm> {sparql_escape(address_form)} ;",
             f"    <{DCT}language> {sparql_escape('nl')} .",
+            f"{sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(activity_uri)} .",
         ]
 
         if model_uri:
