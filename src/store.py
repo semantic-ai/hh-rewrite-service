@@ -56,17 +56,6 @@ def _value(result: dict, key: str) -> str | None:
 class Store:
     """Persist LPDC field generations, rewrite attempts and provenance."""
 
-    def read_guideline(self, guideline_uri: str) -> str | None:
-        """Read the body of one typed guideline resource."""
-
-        query = f"""SELECT ?text WHERE {{
-            {sparql_escape_uri(guideline_uri)} a <{EXT}Guideline> ;
-                <{MU}uuid> ?uuid ;
-                <{DCT}title> ?title ;
-                <{EXT}guidelineText> ?text .
-        }} LIMIT 1"""
-        return _value(template_query(query), "text")
-
     def read_language_variant(self, public_service_uri: str) -> str | None:
         """Read the Dutch address form configured for a public service."""
 

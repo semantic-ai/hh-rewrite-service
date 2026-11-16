@@ -67,34 +67,6 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
     assert "configHash" not in updates[0]
 
 
-def test_read_guideline_queries_typed_resource(monkeypatch) -> None:
-    """Read guideline text from the configured domain graph."""
-
-    queries = []
-    monkeypatch.setattr(
-        store_module,
-        "template_query",
-        lambda query: queries.append(query) or {
-            "results": {
-                "bindings": [
-                    {
-                        "uuid": {"value": "hh-v1"},
-                        "title": {"value": "Heldere Overheid v1"},
-                        "text": {"value": "Gebruik actieve zinnen."},
-                    }
-                ]
-            }
-        },
-    )
-    monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
-    store = Store()
-
-    assert store.read_guideline("http://example.org/guideline/1") == "Gebruik actieve zinnen."
-    assert len(queries) == 1
-    assert "<http://mu.semte.ch/vocabularies/ext/Guideline>" in queries[0]
-    assert "<http://mu.semte.ch/vocabularies/ext/guidelineText>" in queries[0]
-
-
 def test_resolve_by_uuid_filters_rdf_type(monkeypatch) -> None:
     """Resolve only a resource with the requested RDF type."""
 

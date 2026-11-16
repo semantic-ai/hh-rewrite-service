@@ -59,10 +59,6 @@ class FakeStore:
         }
         self.guideline_reads = []
 
-    def read_guideline(self, guideline_uri):
-        self.guideline_reads.append(guideline_uri)
-        return self.guidelines.get(guideline_uri)
-
     def resolve_by_uuid(self, identifier, rdf_type):
         resources = {
             ("123", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"): PUBLIC_SERVICE,

@@ -197,22 +197,8 @@ async def create_rewrite() -> Response:
                 return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
             return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
 
-        guideline_relationship = relationships.guideline.data
-        if guideline_relationship is None:
-            guideline_uri = config.rewrite.guideline_uri
-        else:
-            guideline_uri = guideline_relationship.id
-            parsed_guideline = urlsplit(guideline_uri)
-            if parsed_guideline.scheme not in {"http", "https"} or not parsed_guideline.netloc:
-                return _error(
-                    400,
-                    "invalid_guideline_reference",
-                    "Guideline relationship id must be an absolute URI",
-                )
-
-        guideline_text = store.read_guideline(guideline_uri)
-        if not guideline_text or not guideline_text.strip():
-            return _error(404, "guideline_not_found", "Guideline not found")
+        guideline_uri = config.rewrite.guideline_uri
+        guideline_text = config.rewrite.guidelines
 
         public_service = resource_uri("public_service")
         if public_service is None:
@@ -306,10 +292,10 @@ async def create_rewrite() -> Response:
         )
         return _json_api(201, response.model_dump())
     except (RewriteProviderError, RewriteValidationError):
-        logger.warning("Rewrite model call failed")
+        logger.exception("Rewrite model call failed")
         return _error(504, "model_provider_error", "The rewrite model could not produce a response")
     except Exception:
-        logger.error("Rewrite request failed")
+        logger.exception("Rewrite request failed")
         return _error(500, "rewrite_failed", "The rewrite request failed")
 
 
