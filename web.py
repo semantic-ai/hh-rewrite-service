@@ -197,7 +197,6 @@ async def create_rewrite() -> Response:
                 return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
             return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
 
-        guideline_uri = config.rewrite.guideline_uri
         guideline_text = config.rewrite.guidelines
 
         public_service = resource_uri("public_service")
@@ -251,7 +250,6 @@ async def create_rewrite() -> Response:
             started_at=started_at,
             ended_at=ended_at,
             address_form=address_form,
-            guideline_uri=guideline_uri,
             agent_uri=agent_uri,
             model_uri=model_name_to_uri(config.llm.model_name),
             endpoint=config.llm.base_url or config.llm.provider,
@@ -280,9 +278,6 @@ async def create_rewrite() -> Response:
                 ).model_dump(by_alias=True),
                 relationships={
                     "field-generation": {"data": {"type": "field-generations", "id": field_generation_uri}},
-                    "guideline": {
-                        "data": {"type": "guidelines", "id": guideline_uri}
-                    },
                     "agent": {
                         "data": {"type": "agents", "id": agent_uri}
                     },

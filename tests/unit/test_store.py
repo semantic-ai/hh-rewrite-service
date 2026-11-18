@@ -48,7 +48,6 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
         started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ended_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
         address_form="nl-be-x-formal",
-        guideline_uri="http://example.org/guideline/1",
         agent_uri="http://example.org/agent/1",
     )
 
@@ -156,7 +155,6 @@ def test_write_generation_activity_links_aicall_to_activity(monkeypatch) -> None
         started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ended_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
         address_form="nl-be-x-formal",
-        guideline_uri="http://example.org/guideline/1",
         agent_uri="http://example.org/agent/1",
         model_uri="http://data.lblod.info/ontology/airo#mistral-small-2603",
         endpoint="https://api.mistral.ai/v1",

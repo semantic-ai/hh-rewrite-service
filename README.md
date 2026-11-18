@@ -17,9 +17,7 @@ prompt. Nested settings can be overridden with double-underscore environment
 variables, for example `LLM__PROVIDER=openai`, `LLM__API_KEY=...`,
 `LIMITS__RETRIES=2`.
 
-The configured guideline URI is resolved on every rewrite request through the
-authorized SPARQL endpoint. The resource must be typed `ext:Guideline` and
-provide `mu:uuid`, `dct:title` and `ext:guidelineText`.
+The rewrite guidelines are stored in rewrite.guidelines and inserted into the system prompt through the {guidelines} placeholder.
 
 ### Context window
 
@@ -69,7 +67,7 @@ The service stores one stable field-generation resource and one generation
 activity for every rewrite. The activity is typed as `prov:Activity` and has
 `dct:type lpdc:GenerationActivity`. It contains the attempt number, source
 text, generated text and review status, and records the model invocation and
-links to the selected guideline and agent. An `ext:AICall` resource records
+links to the agent. An `ext:AICall` resource records
 the provider call details when model metadata is
 available.
 
@@ -92,9 +90,6 @@ The main resources and predicates are:
 | `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `adms:status`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
 | `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall` |
 
-The guideline is read as an existing `ext:Guideline` resource. Its required
-properties are `mu:uuid`, `dct:title` and `ext:guidelineText`. The service does
-not create or update guideline resources.
 
 For example, one stored generation activity has this shape:
 
@@ -118,7 +113,6 @@ For example, one stored generation activity has this shape:
   lpdc:generatedText "Vul het formulier in." ;
   adms:status <http://lblod.data.gift/concepts/0ec7b4a8-c281-4ff7-8b50-c02063a1e0dc> ; # Niet gebruikt
     prov:wasAssociatedWith <http://lblod.data.gift/id/components/hh-rewrite/v1.0.0> ;
-    prov:used <https://example.org/guidelines/hh/v3> ;
     ext:addressForm "nl-be-x-formal" ;
     dct:language "nl" ;
     ext:performedAICall <http://data.lblod.info/id/ai-call/example> .
@@ -153,7 +147,6 @@ For example, one stored generation activity has this shape:
 				"data": {"type": "public-services", "id": "123"}
 			},
 			"field-generation": {"data": null},
-      "guideline": {"data": null}
     }
   }
 }
@@ -177,25 +170,6 @@ The `related-subject` and `related-field` pair identifies the exact field.
 have the same predicate. The service requires `related-field` to be an
 absolute URI.
 
-### How the guideline is selected
-
-The caller normally does **not** need to send a `guideline` relationship. The
-service selects and fetches one guideline for the request:
-
-1. `rewrite.guideline_uri` in [config.json](./config.json) identifies the
-  guideline version, for example `https://example.org/guidelines/hh/v3`.
-2. `data.relationships.guideline.data`, when present, identifies the guideline
-  resource for that request. Its `id` must be an absolute URI.
-3. The service reads the matching `ext:Guideline` resource through
-  mu-authorization and places its `ext:guidelineText` in the prompt.
-4. The selected URI is stored as `prov:used` provenance and returned as the
-  task's `guideline` relationship.
-
-Guidelines are assumed to be present in the triplestore. A missing or empty
-resource returns HTTP 404 before a model call or persistence write.
-Environment overrides can change the configured default before startup,
-including `REWRITE__GUIDELINE_URI`.
-
 ### Request relationships
 
 The relationships do not all need to be filled in:
@@ -204,12 +178,10 @@ The relationships do not all need to be filled in:
 | --- | --- | --- | --- |
 | `public-service` | **Yes** | `{ "data": { "type": "public-services", "id": "123" } }` | Existing LPDC product/service instance that provides the context for the rewrite. The service reads settings such as its Dutch language variant from this resource. |
 | `field-generation` | No | Omit it, or send `{ "data": null }`. To reuse a known generation, send `{ "data": { "type": "field-generations", "id": "..." } }`. | Stable parent grouping all rewrite attempts for the same field. If omitted or null, the service finds or creates it from `public-service`, `related-subject` and `related-field`. |
-| `guideline` | No | Omit it, or send `{ "data": null }`. To select a request-specific guideline, send `{ "data": { "type": "guidelines", "id": "https://example.org/guidelines/hh/v3" } }`. | Versioned `ext:Guideline` resource used to build the prompt. If omitted or null, the service uses `rewrite.guideline_uri`. The identifier must be an absolute URI. |
 
 An identifier can be a short JSON:API id such as `"123"` or an absolute
 resource URI. Relationship types are interpreted by the caller and should
-match the expected JSON:API type. The `guideline` relationship must use the
-absolute URI of the external guideline resource.
+match the expected JSON:API type. 
 
 For a first rewrite, this is the minimal valid relationship shape:
 
@@ -365,7 +337,7 @@ read-only. The JSON configuration has three sections:
 | --- | --- |
 | `llm` | Provider, model, endpoint, credentials, timeout and provider-specific options. |
 | `limits` | Maximum input length, maximum attempts and model-call retries. |
-| `rewrite` | Guideline URI, prompt templates and optional prompt-facing labels. |
+| `rewrite` | Guidelines, prompt templates and optional prompt-facing labels. |
 
 Nested configuration values can be overridden with environment variables using
 double underscores. Environment values are parsed as JSON when possible, so
@@ -381,7 +353,6 @@ environment:
   LLM__TEMPERATURE: "1.0"
   LLM__TIMEOUT: "30"
   LIMITS__MAX_INPUT_LENGTH: "4000"
-  REWRITE__GUIDELINE_URI: https://example.org/guidelines/hh/v3
 ```
 
 The environment override is applied after the JSON file is loaded. This makes
@@ -495,12 +466,9 @@ deployment creates the fixed agent and does not permit sudo, use
 
 ### Guideline and prompt configuration
 
-Before sending a rewrite, the service reads `rewrite.guideline_uri` (or the
-request-specific guideline relationship) through the authorized SPARQL
-endpoint. The triplestore must already contain an `ext:Guideline` resource with
-`mu:uuid`, `dct:title` and `ext:guidelineText`; the service does not create
-guidelines. Set `REWRITE__GUIDELINE_URI` when the deployment uses a different
-guideline version.
+The Heerlijk Helder guidelines are stored in rewrite.guidelines and inserted into
+the system prompt through the {guidelines} placeholder. The guidelines are 
+therefore versioned together with the service configuration.
 
 The `rewrite.prompt.system_message` and `rewrite.prompt.user_message` values
 are Python format templates. The user template can use `{field}`,

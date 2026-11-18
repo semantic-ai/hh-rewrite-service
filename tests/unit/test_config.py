@@ -10,11 +10,23 @@ from src.config import load_config
 # ---------------------------------------------------------------------------
 
 
-def test_config_loads_default_guideline_uri(tmp_path: Path) -> None:
-    """Load the default URI and environment overrides."""
+def test_config_loads_guidelines(tmp_path: Path) -> None:
+    """Load configured guidelines and environment overrides."""
 
     config_path = tmp_path / "config.json"
-    config_path.write_bytes(b'{"llm": {"provider": "openai"}}')
+    config_path.write_text(
+        """
+        {
+          "llm": {
+            "provider": "openai"
+          },
+          "rewrite": {
+            "guidelines": "Gebruik actieve zinnen."
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
 
     config = load_config(
         config_path,
@@ -24,5 +36,5 @@ def test_config_loads_default_guideline_uri(tmp_path: Path) -> None:
     )
 
     assert config.llm.model_name == "test-model"
-    assert config.rewrite.guideline_uri == "https://example.org/guidelines/hh/v3"
+    assert config.rewrite.guidelines == "Gebruik actieve zinnen."
 

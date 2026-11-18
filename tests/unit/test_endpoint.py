@@ -54,10 +54,6 @@ class FakeStore:
         self.attempt_number = attempt_number
         self.field_generation = field_generation
         self.writes = []
-        self.guidelines = {
-            ServiceConfig().rewrite.guideline_uri: "Gebruik actieve zinnen."
-        }
-        self.guideline_reads = []
 
     def resolve_by_uuid(self, identifier, rdf_type):
         resources = {
@@ -120,6 +116,7 @@ def configured_client(monkeypatch):
     """Provide a test client with configuration, model and store overrides."""
 
     config = ServiceConfig()
+    config.rewrite.guidelines = "Gebruik actieve zinnen."
     llm = FakeLlm()
     store = FakeStore()
     monkeypatch.setattr(web, "get_config", lambda: config)
@@ -156,8 +153,6 @@ def test_post_rewrite_returns_generation_activity(configured_client):
     assert body["included"] == []
     assert len(store.writes) == 1
     assert llm.calls == 1
-    assert store.guideline_reads == [ServiceConfig().rewrite.guideline_uri]
-    assert store.writes[0]["guideline_uri"] == ServiceConfig().rewrite.guideline_uri
     assert store.writes[0]["model_uri"].endswith("#gpt-6-luna")
     assert store.writes[0]["endpoint"] == "openai"
     assert "Gebruik actieve zinnen." in llm.messages[0][1]["content"]
@@ -182,81 +177,6 @@ def test_post_rewrite_preserves_non_ascii_generated_text(configured_client):
     body = response.get_data(as_text=True)
     assert "é" in body
     assert "\\u00e9" not in body
-
-
-def test_post_rewrite_uses_request_guideline_uri(configured_client):
-    """Use a request-specific guideline for the prompt and provenance."""
-
-    client, llm, store = configured_client
-    guideline_uri = "https://example.org/guidelines/hh/v2"
-    store.guidelines[guideline_uri] = "Gebruik de actieve aanspreekvorm."
-
-    response = client.post(
-        "/hh-rewrites",
-        json=request_payload(
-            relationships={
-                "guideline": {
-                    "data": {"type": "guidelines", "id": guideline_uri}
-                }
-            }
-        ),
-        headers={"content-type": "application/vnd.api+json"},
-    )
-
-    assert response.status_code == 201
-    assert store.guideline_reads == [guideline_uri]
-    assert store.writes[0]["guideline_uri"] == guideline_uri
-    assert response.get_json()["data"]["relationships"]["guideline"]["data"]["id"] == guideline_uri
-    assert "Gebruik de actieve aanspreekvorm." in llm.messages[0][1]["content"]
-
-
-def test_missing_guideline_returns_404_without_model_or_write(configured_client):
-    """Reject a missing guideline before invoking the model or creating data."""
-
-    client, llm, store = configured_client
-    guideline_uri = "https://example.org/guidelines/missing"
-
-    response = client.post(
-        "/hh-rewrites",
-        json=request_payload(
-            relationships={
-                "guideline": {
-                    "data": {"type": "guidelines", "id": guideline_uri}
-                }
-            }
-        ),
-        headers={"content-type": "application/vnd.api+json"},
-    )
-
-    assert response.status_code == 404
-    assert response.get_json()["errors"][0]["code"] == "guideline_not_found"
-    assert store.guideline_reads == [guideline_uri]
-    assert llm.calls == 0
-    assert not store.writes
-
-
-def test_short_guideline_id_returns_400_without_lookup(configured_client):
-    """Reject a guideline relationship that is not an absolute URI."""
-
-    client, llm, store = configured_client
-
-    response = client.post(
-        "/hh-rewrites",
-        json=request_payload(
-            relationships={
-                "guideline": {
-                    "data": {"type": "guidelines", "id": "v2"}
-                }
-            }
-        ),
-        headers={"content-type": "application/vnd.api+json"},
-    )
-
-    assert response.status_code == 400
-    assert response.get_json()["errors"][0]["code"] == "invalid_guideline_reference"
-    assert not store.guideline_reads
-    assert llm.calls == 0
-
 
 @pytest.mark.parametrize(
     ("method", "path", "status", "code"),
