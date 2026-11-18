@@ -73,23 +73,22 @@ available.
 
 The prefixes currently used by the writer are:
 
-| Prefix | Namespace | Use |
-| --- | --- | --- |
-| `lpdc` | `http://data.lblod.info/vocabularies/lpdc/` | Field-generation and generation-activity terms. |
-| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | IPDC-LPDC |
-| `mu` | `http://mu.semte.ch/vocabularies/core/` | Shared UUID values. |
-| `prov` | `http://www.w3.org/ns/prov#` | Activity and provenance relationships. |
-| `ext` | `http://mu.semte.ch/vocabularies/ext/` | Guideline and AI-call metadata owned by the shared service conventions. |
-| `dct` | `http://purl.org/dc/terms/` | Language metadata. |
+| Prefix    | Namespace                                                     | Use                                                                     |
+| --------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `lpdc`    | `http://data.lblod.info/vocabularies/lpdc/`                   | Field-generation and generation-activity terms.                         |
+| `lpdcExt` | `https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#` | IPDC-LPDC                                                               |
+| `mu`      | `http://mu.semte.ch/vocabularies/core/`                       | Shared UUID values.                                                     |
+| `prov`    | `http://www.w3.org/ns/prov#`                                  | Activity and provenance relationships.                                  |
+| `ext`     | `http://mu.semte.ch/vocabularies/ext/`                        | Guideline and AI-call metadata owned by the shared service conventions. |
+| `dct`     | `http://purl.org/dc/terms/`                                   | Language metadata.                                                      |
 
 The main resources and predicates are:
 
-| Resource | Predicates written by this service |
-| --- | --- |
-| `lpdc:FieldGeneration` | `lpdc:relatedSubject`, `lpdc:relatedField`, `lpdc:fieldGenerationInstance`, `lpdc:hasGenerationActivity` (one per attempt), `mu:uuid` |
+| Resource                                                | Predicates written by this service                                                                                                                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lpdc:FieldGeneration`                                  | `lpdc:relatedSubject`, `lpdc:relatedField`, `lpdc:fieldGenerationInstance`, `lpdc:hasGenerationActivity` (one per attempt), `mu:uuid`                                                                         |
 | `prov:Activity` with `dct:type lpdc:GenerationActivity` | `lpdc:attemptNumber`, `lpdc:originalText`, `lpdc:generatedText`, `adms:status`, `prov:startedAtTime`, `prov:endedAtTime`, `prov:wasAssociatedWith`, `prov:used`, `ext:addressForm`, `dct:language`, `mu:uuid` |
-| `ext:AICall` | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall` |
-
+| `ext:AICall`                                            | `ext:endpoint`, `ext:aiModel`, `ext:tokenIn`, `ext:tokenOut`, optional `ext:duration`, `mu:uuid`; linked from the activity with `ext:performedAICall`                                                         |
 
 For example, one stored generation activity has this shape:
 
@@ -127,26 +126,24 @@ For example, one stored generation activity has this shape:
   ext:duration 3.75 .
 ```
 
-
-
 ## API
 
 `POST /hh-rewrites` accepts JSON:API with `Content-Type: application/vnd.api+json`:
 
 ```json
 {
-	"data": {
-		"type": "generation-activities",
-		"attributes": {
-			"original-text": "De aanvrager dient het formulier in te vullen.",
-			"related-subject": "http://data.lblod.info/id/procedures/456",
-			"related-field": "http://purl.org/dc/terms/title"
-		},
-		"relationships": {
-			"public-service": {
-				"data": {"type": "public-services", "id": "123"}
-			},
-			"field-generation": {"data": null},
+  "data": {
+    "type": "generation-activities",
+    "attributes": {
+      "original-text": "De aanvrager dient het formulier in te vullen.",
+      "related-subject": "http://data.lblod.info/id/procedures/456",
+      "related-field": "http://purl.org/dc/terms/title"
+    },
+    "relationships": {
+      "public-service": {
+        "data": { "type": "public-services", "id": "123" }
+      },
+      "field-generation": { "data": null }
     }
   }
 }
@@ -157,13 +154,13 @@ For example, one stored generation activity has this shape:
 The request is a JSON:API document. The top-level `data` object describes
 the generation activity being requested:
 
-| Part | Required? | Meaning |
-| --- | --- | --- |
-| `data.type` | Yes | Must be `generation-activities`. This is the resource type that the service will create. |
-| `data.attributes.original-text` | Yes | Plain text sent to the model. Empty text and markup are rejected, and the service enforces `limits.max_input_length`. |
-| `data.attributes.related-subject` | Yes | URI of the concrete resource that owns the field, such as a procedure or rule. |
-| `data.attributes.related-field` | Yes | Absolute URI of the field predicate on that subject, such as `http://purl.org/dc/terms/title`. |
-| `data.relationships` | `public-service` is required for a successful request | The rewrite cannot proceed without `data.relationships.public-service`. Send the `public-service` relationship shown below. |
+| Part                              | Required?                                             | Meaning                                                                                                                     |
+| --------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `data.type`                       | Yes                                                   | Must be `generation-activities`. This is the resource type that the service will create.                                    |
+| `data.attributes.original-text`   | Yes                                                   | Plain text sent to the model. Empty text and markup are rejected, and the service enforces `limits.max_input_length`.       |
+| `data.attributes.related-subject` | Yes                                                   | URI of the concrete resource that owns the field, such as a procedure or rule.                                              |
+| `data.attributes.related-field`   | Yes                                                   | Absolute URI of the field predicate on that subject, such as `http://purl.org/dc/terms/title`.                              |
+| `data.relationships`              | `public-service` is required for a successful request | The rewrite cannot proceed without `data.relationships.public-service`. Send the `public-service` relationship shown below. |
 
 The `related-subject` and `related-field` pair identifies the exact field.
 `related-field` alone is not enough because different nested resources can
@@ -174,14 +171,14 @@ absolute URI.
 
 The relationships do not all need to be filled in:
 
-| Relationship | Required? | What to send | Meaning |
-| --- | --- | --- | --- |
-| `public-service` | **Yes** | `{ "data": { "type": "public-services", "id": "123" } }` | Existing LPDC product/service instance that provides the context for the rewrite. The service reads settings such as its Dutch language variant from this resource. |
-| `field-generation` | No | Omit it, or send `{ "data": null }`. To reuse a known generation, send `{ "data": { "type": "field-generations", "id": "..." } }`. | Stable parent grouping all rewrite attempts for the same field. If omitted or null, the service finds or creates it from `public-service`, `related-subject` and `related-field`. |
+| Relationship       | Required? | What to send                                                                                                                       | Meaning                                                                                                                                                                           |
+| ------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public-service`   | **Yes**   | `{ "data": { "type": "public-services", "id": "123" } }`                                                                           | Existing LPDC product/service instance that provides the context for the rewrite. The service reads settings such as its Dutch language variant from this resource.               |
+| `field-generation` | No        | Omit it, or send `{ "data": null }`. To reuse a known generation, send `{ "data": { "type": "field-generations", "id": "..." } }`. | Stable parent grouping all rewrite attempts for the same field. If omitted or null, the service finds or creates it from `public-service`, `related-subject` and `related-field`. |
 
 An identifier can be a short JSON:API id such as `"123"` or an absolute
 resource URI. Relationship types are interpreted by the caller and should
-match the expected JSON:API type. 
+match the expected JSON:API type.
 
 For a first rewrite, this is the minimal valid relationship shape:
 
@@ -239,13 +236,13 @@ public-service (the concrete LPDC product/service instance)
 
 The corresponding JSON:API resource types are:
 
-| Resource type | Role | Main relationship |
-| --- | --- | --- |
-| `public-services` | Concrete LPDC service/product instance (`lpdcExt:InstancePublicService`) | Context for the resources below |
-| `field-generations` | Stable grouping for one field on that service | Belongs to a `public-service`; contains generation activities |
-| `generation-activities` | One AI rewrite activity with its input/output text and review status | Belongs to a `field-generation` |
-| `decision-documents` | Source document used by the extraction workflow | Belongs to a `public-service` |
-| `attachments` | File content attached to a decision document | Belongs to a `decision-document` or another attachment |
+| Resource type           | Role                                                                     | Main relationship                                             |
+| ----------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `public-services`       | Concrete LPDC service/product instance (`lpdcExt:InstancePublicService`) | Context for the resources below                               |
+| `field-generations`     | Stable grouping for one field on that service                            | Belongs to a `public-service`; contains generation activities |
+| `generation-activities` | One AI rewrite activity with its input/output text and review status     | Belongs to a `field-generation`                               |
+| `decision-documents`    | Source document used by the extraction workflow                          | Belongs to a `public-service`                                 |
+| `attachments`           | File content attached to a decision document                             | Belongs to a `decision-document` or another attachment        |
 
 `public-services` is not created by this rewrite service. It is an existing
 LPDC resource. The service uses its identifier to establish the product
@@ -293,7 +290,6 @@ triplestore are running before using it. Set both `MU_SPARQL_ENDPOINT` and
 `MU_SPARQL_UPDATEPOINT` to the SPARQL service address, for example
 `http://database:8890/sparql` when the services share a Compose network.
 
-
 Request handling never uses sudo. Every query carries the caller's session
 headers, so mu-authorization is the only access check: a public service or
 field generation the user cannot see resolves to a 404 before the model is
@@ -324,6 +320,7 @@ triplestore regularly takes longer to become available.
 Rewrite requests reference the registered URI in their provenance activity.
 
 ## Deployment and configuration
+
 Define the service in the deployment stack that provides its mu-services,
 triplestore and network. This repository provides the service image definition
 and example configuration files; the deployment defines the Compose service.
@@ -333,11 +330,11 @@ The container reads its configuration from `CONFIG_PATH`, which defaults to
 configuration managed by the deployment) at that path, preferably
 read-only. The JSON configuration has three sections:
 
-| Section | Purpose |
-| --- | --- |
-| `llm` | Provider, model, endpoint, credentials, timeout and provider-specific options. |
-| `limits` | Maximum input length, maximum attempts and model-call retries. |
-| `rewrite` | Guidelines, prompt templates and optional prompt-facing labels. |
+| Section   | Purpose                                                                        |
+| --------- | ------------------------------------------------------------------------------ |
+| `llm`     | Provider, model, endpoint, credentials, timeout and provider-specific options. |
+| `limits`  | Maximum input length, maximum attempts and model-call retries.                 |
+| `rewrite` | Guidelines, prompt templates and optional prompt-facing labels.                |
 
 Nested configuration values can be overridden with environment variables using
 double underscores. Environment values are parsed as JSON when possible, so
@@ -385,8 +382,6 @@ services:
       database:
         condition: service_healthy
 ```
-
-
 
 ### Ollama provider
 
@@ -441,8 +436,7 @@ volumes:
 ```
 
 The matching `config-ollama.json` selects
-`gemma4:26b-a4b-it-qat`, sets `timeout` to 120 seconds and sets `num_ctx` to
-8192. `num_ctx` is passed only to Ollama and should be large enough to retain
+`gemma4:26b-a4b-it-qat`, sets `timeout` to 120 seconds and sets `num_ctx` to 8192. `num_ctx` is passed only to Ollama and should be large enough to retain
 the guideline and input text in the prompt. This 26B model requires an NVIDIA
 GPU with Docker GPU support for practical response times. The Compose device
 reservation shown above is therefore required for the intended deployment;
@@ -467,7 +461,7 @@ deployment creates the fixed agent and does not permit sudo, use
 ### Guideline and prompt configuration
 
 The Heerlijk Helder guidelines are stored in rewrite.guidelines and inserted into
-the system prompt through the {guidelines} placeholder. The guidelines are 
+the system prompt through the {guidelines} placeholder. The guidelines are
 therefore versioned together with the service configuration.
 
 The `rewrite.prompt.system_message` and `rewrite.prompt.user_message` values
