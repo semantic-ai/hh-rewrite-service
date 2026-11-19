@@ -10,7 +10,6 @@ from __future__ import annotations
 import builtins
 import json
 import logging
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -28,7 +27,8 @@ from src.agent_registry import (
     wait_for_triplestore,
     write_agent_info,
 )
-from src.config import ServiceConfig, get_config
+from src.constants import DATA_URI_BASE, FIELD_GENERATION, INSTANCE_PUBLIC_SERVICE, NOT_USED
+from src.config import get_config
 from src.rewrite import (
     RewriteProviderError,
     RewriteValidationError,
@@ -59,8 +59,8 @@ AGENT_URI = "http://lblod.data.gift/id/components/hh-rewrite/v1.0.0"
 JSON_API_MEDIA_TYPE = "application/vnd.api+json"
 
 RESOURCE_RDF_TYPES = {
-    "public_service": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService",
-    "field_generation": "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#FieldGeneration",
+    "public_service": INSTANCE_PUBLIC_SERVICE,
+    "field_generation": FIELD_GENERATION,
 }
 
 def _startup() -> None:
@@ -71,12 +71,6 @@ def _startup() -> None:
         # write_agent_info needs sudo to write the jobs graph; without it the
         # agent resource is seeded by a migration instead.
         set_agent_uri(AGENT_URI)
-
-
-def _new_uri(resource_type: str) -> str:
-    """Create a new URI in the shared data namespace."""
-
-    return f"http://data.lblod.info/id/{resource_type}/{uuid.uuid4()}"
 
 
 def _iso(value: datetime) -> str:
@@ -185,8 +179,6 @@ async def create_rewrite() -> Response:
 
         if not original_text.strip():
             return _error(422, "empty_text", "original-text must not be empty")
-        if re.search(r"<\s*/?\s*[A-Za-z][^>]*>", original_text):
-            return _error(422, "markup_not_allowed", "original-text must not contain markup")
         if len(original_text) > config.limits.max_input_length:
             return _error(413, "input_too_large", "original-text exceeds the configured maximum length")
 
@@ -205,22 +197,7 @@ async def create_rewrite() -> Response:
                 return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
             return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
 
-        guideline_relationship = relationships.guideline.data
-        if guideline_relationship is None:
-            guideline_uri = config.rewrite.guideline_uri
-        else:
-            guideline_uri = guideline_relationship.id
-            parsed_guideline = urlsplit(guideline_uri)
-            if parsed_guideline.scheme not in {"http", "https"} or not parsed_guideline.netloc:
-                return _error(
-                    400,
-                    "invalid_guideline_reference",
-                    "Guideline relationship id must be an absolute URI",
-                )
-
-        guideline_text = store.read_guideline(guideline_uri)
-        if not guideline_text or not guideline_text.strip():
-            return _error(404, "guideline_not_found", "Guideline not found")
+        guideline_text = config.rewrite.guidelines
 
         public_service = resource_uri("public_service")
         if public_service is None:
@@ -261,7 +238,8 @@ async def create_rewrite() -> Response:
         ended_at = datetime.now(timezone.utc)
 
         # Store the generated text and provenance as one domain operation.
-        activity_uri = _new_uri("generation-activities")
+        activity_uuid = str(uuid.uuid4())
+        activity_uri = f"{DATA_URI_BASE}generation-activities/{activity_uuid}"
 
         store.write_generation_activity(
             activity_uri=activity_uri,
@@ -272,7 +250,6 @@ async def create_rewrite() -> Response:
             started_at=started_at,
             ended_at=ended_at,
             address_form=address_form,
-            guideline_uri=guideline_uri,
             agent_uri=agent_uri,
             model_uri=model_name_to_uri(config.llm.model_name),
             endpoint=config.llm.base_url or config.llm.provider,
@@ -280,11 +257,11 @@ async def create_rewrite() -> Response:
             tokens_out=usage.tokens_out,
             duration=usage.duration,
         )
-        
+
         response = RewriteResponse(
             data=Resource(
                 type="generation-activities",
-                id=activity_uri,
+                id=activity_uuid,
                 attributes=ActivityAttributes(
                     uri=activity_uri,
                     **{
@@ -296,14 +273,11 @@ async def create_rewrite() -> Response:
                         "model": config.llm.model_name,
                         "address-form": address_form,
                         "language": "nl",
-                        "status": "notUsed",
+                        "status": NOT_USED,
                     },
                 ).model_dump(by_alias=True),
                 relationships={
                     "field-generation": {"data": {"type": "field-generations", "id": field_generation_uri}},
-                    "guideline": {
-                        "data": {"type": "guidelines", "id": guideline_uri}
-                    },
                     "agent": {
                         "data": {"type": "agents", "id": agent_uri}
                     },
@@ -313,10 +287,10 @@ async def create_rewrite() -> Response:
         )
         return _json_api(201, response.model_dump())
     except (RewriteProviderError, RewriteValidationError):
-        logger.warning("Rewrite model call failed")
+        logger.exception("Rewrite model call failed")
         return _error(504, "model_provider_error", "The rewrite model could not produce a response")
     except Exception:
-        logger.error("Rewrite request failed")
+        logger.exception("Rewrite request failed")
         return _error(500, "rewrite_failed", "The rewrite request failed")
 
 
