@@ -56,17 +56,6 @@ def _value(result: dict, key: str) -> str | None:
 class Store:
     """Persist LPDC field generations, rewrite attempts and provenance."""
 
-    def read_guideline(self, guideline_uri: str) -> str | None:
-        """Read the body of one typed guideline resource."""
-
-        query = f"""SELECT ?text WHERE {{
-            {sparql_escape_uri(guideline_uri)} a <{EXT}Guideline> ;
-                <{MU}uuid> ?uuid ;
-                <{DCT}title> ?title ;
-                <{EXT}guidelineText> ?text .
-        }} LIMIT 1"""
-        return _value(template_query(query), "text")
-
     def read_language_variant(self, public_service_uri: str) -> str | None:
         """Read the Dutch address form configured for a public service."""
 
@@ -168,7 +157,6 @@ class Store:
         started_at: datetime,
         ended_at: datetime,
         address_form: str,
-        guideline_uri: str,
         agent_uri: str,
         model_uri: str | None = None,
         endpoint: str | None = None,
@@ -190,7 +178,6 @@ class Store:
             f"    <{PROV}startedAtTime> {sparql_escape(started_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}endedAtTime> {sparql_escape(ended_at.astimezone(timezone.utc))} ;",
             f"    <{PROV}wasAssociatedWith> {sparql_escape_uri(agent_uri)} ;",
-            f"    <{PROV}used> {sparql_escape_uri(guideline_uri)} ;",
             f"    <{EXT}addressForm> {sparql_escape(address_form)} ;",
             f"    <{DCT}language> {sparql_escape('nl')} .",
             f"{sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(activity_uri)} .",

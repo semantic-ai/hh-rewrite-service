@@ -48,7 +48,6 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
         started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ended_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
         address_form="nl-be-x-formal",
-        guideline_uri="http://example.org/guideline/1",
         agent_uri="http://example.org/agent/1",
     )
 
@@ -65,34 +64,6 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
     assert 'Origineel \\\"tekst\\\" \\\\\\"' in updates[0]
     assert "hasConfig" not in updates[0]
     assert "configHash" not in updates[0]
-
-
-def test_read_guideline_queries_typed_resource(monkeypatch) -> None:
-    """Read guideline text from the configured domain graph."""
-
-    queries = []
-    monkeypatch.setattr(
-        store_module,
-        "template_query",
-        lambda query: queries.append(query) or {
-            "results": {
-                "bindings": [
-                    {
-                        "uuid": {"value": "hh-v1"},
-                        "title": {"value": "Heldere Overheid v1"},
-                        "text": {"value": "Gebruik actieve zinnen."},
-                    }
-                ]
-            }
-        },
-    )
-    monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
-    store = Store()
-
-    assert store.read_guideline("http://example.org/guideline/1") == "Gebruik actieve zinnen."
-    assert len(queries) == 1
-    assert "<http://mu.semte.ch/vocabularies/ext/Guideline>" in queries[0]
-    assert "<http://mu.semte.ch/vocabularies/ext/guidelineText>" in queries[0]
 
 
 def test_resolve_by_uuid_filters_rdf_type(monkeypatch) -> None:
@@ -184,7 +155,6 @@ def test_write_generation_activity_links_aicall_to_activity(monkeypatch) -> None
         started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ended_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
         address_form="nl-be-x-formal",
-        guideline_uri="http://example.org/guideline/1",
         agent_uri="http://example.org/agent/1",
         model_uri="http://data.lblod.info/ontology/airo#mistral-small-2603",
         endpoint="https://api.mistral.ai/v1",

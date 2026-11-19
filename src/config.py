@@ -110,7 +110,7 @@ def _default_field_labels() -> list[FieldLabel]:
 class RewriteConfig(BaseModel):
     """Guideline identity, prompt configuration and prompt-facing labels."""
 
-    guideline_uri: str = "https://example.org/guidelines/hh/v3"
+    guidelines: str = ""
     prompt: PromptConfig = Field(default_factory=PromptConfig)
     # Instance language variants mapped to the address form named in the guidelines.
     address_forms: dict[str, str] = Field(
