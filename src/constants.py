@@ -17,6 +17,7 @@ LPDC = "http://data.lblod.info/vocabularies/lpdc/"
 LPDCEXT = "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#"
 M8G = "http://data.europa.eu/m8g/"
 MU = "http://mu.semte.ch/vocabularies/core/"
+OSLC = "http://open-services.net/ns/core#"
 PROV = "http://www.w3.org/ns/prov#"
 SCHEMA = "https://schema.org/"
 TASK = "http://redpencil.data.gift/vocabularies/tasks/"
@@ -24,6 +25,8 @@ TCS = "https://w3id.org/tcs#"
 
 # Base for newly minted resource URIs: f"{DATA_URI_BASE}<type>/<uuid>".
 DATA_URI_BASE = "http://data.lblod.info/id/"
+JOB_URI_PREFIX = "http://redpencil.data.gift/id/job/"
+ERROR_URI_PREFIX = "http://redpencil.data.gift/id/jobs/error/"
 
 # ---------------------------------------------------------------------------
 # Types and predicates
@@ -33,9 +36,24 @@ INSTANCE_PUBLIC_SERVICE = f"{LPDCEXT}InstancePublicService"
 FIELD_GENERATION = f"{LPDC}FieldGeneration"
 GENERATION_ACTIVITY = f"{LPDC}GenerationActivity"
 HAS_GENERATION_ACTIVITY = f"{LPDC}hasGenerationActivity"
+JOB_TYPE = "http://vocab.deri.ie/cogs#Job"
+TASK_TYPE = "http://redpencil.data.gift/vocabularies/tasks/Task"
 
 # ---------------------------------------------------------------------------
 # Concepts
 # ---------------------------------------------------------------------------
 
 NOT_USED = "http://lblod.data.gift/concepts/0ec7b4a8-c281-4ff7-8b50-c02063a1e0dc"
+
+JOB_STATUS = {
+    "PREPARING": "http://redpencil.data.gift/id/concept/JobStatus/preparing",
+    "BUSY": "http://redpencil.data.gift/id/concept/JobStatus/busy",
+    "SCHEDULED": "http://redpencil.data.gift/id/concept/JobStatus/scheduled",
+    "SUCCESS": "http://redpencil.data.gift/id/concept/JobStatus/success",
+    "FAILED": "http://redpencil.data.gift/id/concept/JobStatus/failed",
+}
+
+JOB_OPERATION = "http://lblod.data.gift/id/jobs/concept/JobOperation/lpdcHhRewrite"
+TASK_OPERATION = {
+    "REWRITE": "http://lblod.data.gift/id/jobs/concept/TaskOperation/lpdcHhRewrite",
+}

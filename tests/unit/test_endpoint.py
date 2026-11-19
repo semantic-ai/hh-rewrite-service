@@ -81,8 +81,18 @@ class FakeStore:
     def next_attempt_number(self, field_generation_uri):
         return self.attempt_number
 
+    def create_task(self, **values):
+        self.task = values
+
+    def start_rewrite_task(self, activity_uri, job_uri, started_at):
+        self.execution_status = "busy"
+
+    def fail_rewrite_task(self, activity_uri, job_uri, error):
+        self.execution_status = "failed"
+
     def write_generation_activity(self, **values):
         self.writes.append(values)
+        self.execution_status = "success"
 
 # ---------------------------------------------------------------------------
 # Fixtures and request construction

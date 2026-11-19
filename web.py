@@ -27,7 +27,14 @@ from src.agent_registry import (
     wait_for_triplestore,
     write_agent_info,
 )
-from src.constants import DATA_URI_BASE, FIELD_GENERATION, INSTANCE_PUBLIC_SERVICE, NOT_USED
+from src.constants import (
+    DATA_URI_BASE,
+    FIELD_GENERATION,
+    INSTANCE_PUBLIC_SERVICE,
+    JOB_URI_PREFIX,
+    NOT_USED,
+    TASK_OPERATION,
+)
 from src.config import get_config
 from src.rewrite import (
     RewriteProviderError,
@@ -146,6 +153,15 @@ def get_agent() -> str:
 async def create_rewrite() -> Response:
     """Run one rewrite, persist it and return the generated activity."""
 
+    task_uris: tuple[str, str] | None = None
+
+    def fail_task(error: Exception) -> None:
+        if task_uris is not None:
+            try:
+                store.fail_rewrite_task(*task_uris, error)
+            except Exception:
+                logger.exception("Failed to persist failure for rewrite task %s", task_uris[0])
+
     try:
         llm = get_llm()
         store = get_store()
@@ -225,8 +241,20 @@ async def create_rewrite() -> Response:
         prompt_field = field_label(config, subject_types, related_field)
         prompt_address_form = address_form_label(config, address_form)
 
-        # Only the model invocation is provider-dependent; persistence remains deterministic.
+        activity_uuid = str(uuid.uuid4())
+        activity_uri = f"{DATA_URI_BASE}generation-activities/{activity_uuid}"
+        job_uri = f"{JOB_URI_PREFIX}{uuid.uuid4()}"
+        store.create_task(
+            activity_uri=activity_uri,
+            job_uri=job_uri,
+            operation=TASK_OPERATION["REWRITE"],
+            agent_uri=agent_uri,
+        )
+        task_uris = (activity_uri, job_uri)
         started_at = datetime.now(timezone.utc)
+        store.start_rewrite_task(activity_uri, job_uri, started_at)
+
+        # Only the model invocation is provider-dependent; persistence remains deterministic.
         result, usage = await rewrite_text(
             config,
             llm,
@@ -238,11 +266,9 @@ async def create_rewrite() -> Response:
         ended_at = datetime.now(timezone.utc)
 
         # Store the generated text and provenance as one domain operation.
-        activity_uuid = str(uuid.uuid4())
-        activity_uri = f"{DATA_URI_BASE}generation-activities/{activity_uuid}"
-
         store.write_generation_activity(
             activity_uri=activity_uri,
+            job_uri=job_uri,
             field_generation_uri=field_generation_uri,
             attempt_number=attempt_number,
             original_text=original_text,
@@ -257,6 +283,7 @@ async def create_rewrite() -> Response:
             tokens_out=usage.tokens_out,
             duration=usage.duration,
         )
+        task_uris = None
 
         response = RewriteResponse(
             data=Resource(
@@ -286,11 +313,13 @@ async def create_rewrite() -> Response:
             included=[],
         )
         return _json_api(201, response.model_dump())
-    except (RewriteProviderError, RewriteValidationError):
+    except (RewriteProviderError, RewriteValidationError) as error:
         logger.exception("Rewrite model call failed")
+        fail_task(error)
         return _error(504, "model_provider_error", "The rewrite model could not produce a response")
-    except Exception:
+    except Exception as error:
         logger.exception("Rewrite request failed")
+        fail_task(error)
         return _error(500, "rewrite_failed", "The rewrite request failed")
 
 
@@ -300,4 +329,3 @@ async def create_rewrite() -> Response:
 if hasattr(builtins, "app"):
     builtins.app.register_blueprint(bp)
     _startup()
-

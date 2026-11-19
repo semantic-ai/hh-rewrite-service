@@ -30,10 +30,15 @@ def sparql_escape_uri(value):
 
 
 def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkeypatch) -> None:
-    """Write domain and provenance data through one update operation."""
+    """Write domain data, provenance and successful status through one update."""
 
     updates = []
-    monkeypatch.setattr(store_module, "template_query", lambda query: [])
+    monkeypatch.setattr(store_module, "template_query", lambda query: {
+        "results": {"bindings": [
+            {"resource": {"value": "http://example.org/activity/1"}},
+            {"resource": {"value": "http://example.org/job/1"}},
+        ]}
+    })
     monkeypatch.setattr(store_module, "template_update", updates.append)
     monkeypatch.setattr(store_module, "sparql_escape", sparql_escape)
     monkeypatch.setattr(store_module, "sparql_escape_uri", sparql_escape_uri)
@@ -41,6 +46,7 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
 
     store.write_generation_activity(
         activity_uri="http://example.org/activity/1",
+        job_uri="http://example.org/job/1",
         field_generation_uri="http://example.org/generation/1",
         attempt_number=1,
         original_text='Origineel "tekst" \\"',
@@ -52,10 +58,10 @@ def test_write_generation_activity_uses_one_insert_and_preserves_literals(monkey
     )
 
     assert len(updates) == 1
-    assert updates[0].startswith("INSERT DATA")
+    assert updates[0].startswith("DELETE")
     assert "a <http://www.w3.org/ns/prov#Activity>" in updates[0]
     assert "http://data.lblod.info/vocabularies/lpdc/GenerationActivity" in updates[0]
-    assert f"<http://www.w3.org/ns/adms#status> <{NOT_USED}>" in updates[0]
+    assert f"<http://data.lblod.info/vocabularies/lpdc/usageStatus> <{NOT_USED}>" in updates[0]
     assert (
         "<http://example.org/generation/1> "
         "<http://data.lblod.info/vocabularies/lpdc/hasGenerationActivity> "
@@ -140,6 +146,12 @@ def test_write_generation_activity_links_aicall_to_activity(monkeypatch) -> None
 
     updates = []
     monkeypatch.setattr(store_module, "template_update", updates.append)
+    monkeypatch.setattr(store_module, "template_query", lambda query: {
+        "results": {"bindings": [
+            {"resource": {"value": "http://example.org/activity/1"}},
+            {"resource": {"value": "http://example.org/job/1"}},
+        ]}
+    })
     monkeypatch.setattr(store_module, "sparql_escape", sparql_escape)
     monkeypatch.setattr(store_module, "sparql_escape_float", lambda value: str(value))
     monkeypatch.setattr(store_module, "sparql_escape_int", lambda value: str(value))
@@ -148,6 +160,7 @@ def test_write_generation_activity_links_aicall_to_activity(monkeypatch) -> None
 
     store.write_generation_activity(
         activity_uri="http://example.org/activity/1",
+        job_uri="http://example.org/job/1",
         field_generation_uri="http://example.org/generation/1",
         attempt_number=1,
         original_text="Origineel",
