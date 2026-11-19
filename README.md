@@ -68,14 +68,8 @@ activity for every rewrite. The activity is typed as both `prov:Activity` and
 `task:Task` (same URI), with `dct:type lpdc:GenerationActivity`. It contains the
 attempt number, source text, generated text and usage status, and records the
 model invocation and links to the agent. An `ext:AICall` resource records
-the provider call details when model metadata is available.
-
-Each rewrite has a parent `cogs:Job` linked through `dct:isPartOf`. The task
-has `dct:created`, `dct:modified`, `task:operation` and `task:index "0"`, plus
-input/result `nfo:DataContainer` links. Job and task execution status uses
-`adms:status`: `scheduled` → `busy` → `success` or `failed`, updating
-`dct:modified` on each transition and linking errors through `task:error`.
-Requests remain synchronous; no Compose changes or sudo access are required.
+the provider call details when model metadata is available. 
+Each rewrite has a parent `cogs:Job` linked through `dct:isPartOf`.
 
 The prefixes currently used by the writer are:
 

@@ -1,4 +1,4 @@
-"""HTTP boundary for synchronous HH rewrites.
+"""HTTP boundary for background HH rewrites.
 
 The mu-python-template owns application assembly and the request context. This
 module defines startup registration plus the rewrite service's router, request
@@ -7,15 +7,17 @@ mapping, dependency adapters and endpoint orchestration.
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from threading import Thread
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, copy_current_request_context, request
 from pydantic import ValidationError
 from werkzeug.exceptions import HTTPException
 
@@ -32,24 +34,17 @@ from src.constants import (
     FIELD_GENERATION,
     INSTANCE_PUBLIC_SERVICE,
     JOB_URI_PREFIX,
-    NOT_USED,
+    JOB_STATUS,
     TASK_OPERATION,
 )
 from src.config import get_config
 from src.rewrite import (
-    RewriteProviderError,
-    RewriteValidationError,
     address_form_label,
     field_label,
     make_llm,
     rewrite_text,
 )
-from src.schema import (
-    ActivityAttributes,
-    Resource,
-    RewriteRequest,
-    RewriteResponse,
-)
+from src.schema import RewriteRequest
 
 if TYPE_CHECKING:
     from src.store import Store
@@ -78,12 +73,6 @@ def _startup() -> None:
         # write_agent_info needs sudo to write the jobs graph; without it the
         # agent resource is seeded by a migration instead.
         set_agent_uri(AGENT_URI)
-
-
-def _iso(value: datetime) -> str:
-    """Serialize a timestamp in the UTC format used by JSON:API responses."""
-
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _json_api(status_code: int, content: dict[str, Any]) -> Response:
@@ -150,8 +139,8 @@ def get_agent() -> str:
 
 
 @bp.post("/hh-rewrites")
-async def create_rewrite() -> Response:
-    """Run one rewrite, persist it and return the generated activity."""
+def create_rewrite() -> Response:
+    """Create a task and return its URI while the rewrite runs in the background."""
 
     task_uris: tuple[str, str] | None = None
 
@@ -163,7 +152,6 @@ async def create_rewrite() -> Response:
                 logger.exception("Failed to persist failure for rewrite task %s", task_uris[0])
 
     try:
-        llm = get_llm()
         store = get_store()
         config = get_config()
         agent_uri = get_agent()
@@ -251,72 +239,54 @@ async def create_rewrite() -> Response:
             agent_uri=agent_uri,
         )
         task_uris = (activity_uri, job_uri)
-        started_at = datetime.now(timezone.utc)
-        store.start_rewrite_task(activity_uri, job_uri, started_at)
 
-        # Only the model invocation is provider-dependent; persistence remains deterministic.
-        result, usage = await rewrite_text(
-            config,
-            llm,
-            field=prompt_field,
-            address_form=prompt_address_form,
-            guideline_text=guideline_text,
-            text=original_text,
-        )
-        ended_at = datetime.now(timezone.utc)
+        @copy_current_request_context
+        def run_rewrite() -> None:
+            try:
+                started_at = datetime.now(timezone.utc)
+                store.start_rewrite_task(activity_uri, job_uri, started_at)
+                result, usage = asyncio.run(
+                    rewrite_text(
+                        config,
+                        get_llm(),
+                        field=prompt_field,
+                        address_form=prompt_address_form,
+                        guideline_text=guideline_text,
+                        text=original_text,
+                    )
+                )
+                ended_at = datetime.now(timezone.utc)
 
-        # Store the generated text and provenance as one domain operation.
-        store.write_generation_activity(
-            activity_uri=activity_uri,
-            job_uri=job_uri,
-            field_generation_uri=field_generation_uri,
-            attempt_number=attempt_number,
-            original_text=original_text,
-            generated_text=result.generated_text,
-            started_at=started_at,
-            ended_at=ended_at,
-            address_form=address_form,
-            agent_uri=agent_uri,
-            model_uri=model_name_to_uri(config.llm.model_name),
-            endpoint=config.llm.base_url or config.llm.provider,
-            tokens_in=usage.tokens_in,
-            tokens_out=usage.tokens_out,
-            duration=usage.duration,
-        )
-        task_uris = None
+                store.write_generation_activity(
+                    activity_uri=activity_uri,
+                    job_uri=job_uri,
+                    field_generation_uri=field_generation_uri,
+                    attempt_number=attempt_number,
+                    original_text=original_text,
+                    generated_text=result.generated_text,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    address_form=address_form,
+                    agent_uri=agent_uri,
+                    model_uri=model_name_to_uri(config.llm.model_name),
+                    endpoint=config.llm.base_url or config.llm.provider,
+                    tokens_in=usage.tokens_in,
+                    tokens_out=usage.tokens_out,
+                    duration=usage.duration,
+                )
+            except Exception as error:
+                logger.exception("Rewrite task %s failed", activity_uri)
+                fail_task(error)
 
-        response = RewriteResponse(
-            data=Resource(
-                type="generation-activities",
-                id=activity_uuid,
-                attributes=ActivityAttributes(
-                    uri=activity_uri,
-                    **{
-                        "attempt-number": attempt_number,
-                        "original-text": original_text,
-                        "generated-text": result.generated_text,
-                        "started-at": _iso(started_at),
-                        "ended-at": _iso(ended_at),
-                        "model": config.llm.model_name,
-                        "address-form": address_form,
-                        "language": "nl",
-                        "status": NOT_USED,
-                    },
-                ).model_dump(by_alias=True),
-                relationships={
-                    "field-generation": {"data": {"type": "field-generations", "id": field_generation_uri}},
-                    "agent": {
-                        "data": {"type": "agents", "id": agent_uri}
-                    },
-                },
-            ),
-            included=[],
+        Thread(target=run_rewrite).start()
+        return Response(
+            json.dumps({
+                "status": JOB_STATUS["SCHEDULED"],
+                "generation_activity_uri": activity_uri,
+            }),
+            status=202,
+            mimetype="application/json",
         )
-        return _json_api(201, response.model_dump())
-    except (RewriteProviderError, RewriteValidationError) as error:
-        logger.exception("Rewrite model call failed")
-        fail_task(error)
-        return _error(504, "model_provider_error", "The rewrite model could not produce a response")
     except Exception as error:
         logger.exception("Rewrite request failed")
         fail_task(error)
