@@ -159,7 +159,14 @@ class Store:
             return 1
 
     def create_task(
-        self, activity_uri: str, job_uri: str, operation: str, agent_uri: str
+        self,
+        activity_uri: str,
+        job_uri: str,
+        operation: str,
+        agent_uri: str,
+        field_generation_uri: str,
+        attempt_number: int,
+        original_text: str,
     ) -> None:
         """Create the scheduled job and its task/activity together."""
 
@@ -181,7 +188,10 @@ class Store:
                 <{TASK}operation> {sparql_escape_uri(operation)} ;
                 <{TASK}index> {sparql_escape("0")} ;
                 <{PROV}wasAssociatedWith> {sparql_escape_uri(agent_uri)} ;
+                <{LPDC}attemptNumber> {sparql_escape_int(attempt_number)} ;
+                <{LPDC}originalText> {sparql_escape(original_text)} ;
                 <{ADMS}status> <{JOB_STATUS["SCHEDULED"]}> .
+            {sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(activity_uri)} .
         }}""")
 
     def _update_execution_status(
@@ -251,9 +261,6 @@ class Store:
         *,
         activity_uri: str,
         job_uri: str,
-        field_generation_uri: str,
-        attempt_number: int,
-        original_text: str,
         generated_text: str,
         started_at: datetime,
         ended_at: datetime,
@@ -272,8 +279,6 @@ class Store:
             f"    a <{TASK_TYPE}> ;",
             f"    <{DCT}type> <{GENERATION_ACTIVITY}> ;",
             f"    <{MU}uuid> {sparql_escape(activity_uri.rsplit('/', 1)[-1])} ;",
-            f"    <{LPDC}attemptNumber> {sparql_escape_int(attempt_number)} ;",
-            f"    <{LPDC}originalText> {sparql_escape(original_text)} ;",
             f"    <{LPDC}generatedText> {sparql_escape(generated_text)} ;",
             f"    <{LPDC}usageStatus> <{NOT_USED}> ;",
             f"    <{PROV}startedAtTime> {_datetime(started_at)} ;",
@@ -281,7 +286,6 @@ class Store:
             f"    <{PROV}wasAssociatedWith> {sparql_escape_uri(agent_uri)} ;",
             f"    <{LPDCEXT}dutchLanguageVariant> {sparql_escape(address_form)} ;",
             f"    <{DCT}language> {sparql_escape('nl')} .",
-            f"{sparql_escape_uri(field_generation_uri)} <{HAS_GENERATION_ACTIVITY}> {sparql_escape_uri(activity_uri)} .",
         ]
 
         if model_uri:

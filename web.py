@@ -75,26 +75,14 @@ def _startup() -> None:
         set_agent_uri(AGENT_URI)
 
 
-def _json_api(status_code: int, content: dict[str, Any]) -> Response:
-    body = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
-    return Response(body, status=status_code, mimetype=JSON_API_MEDIA_TYPE)
+def _error(status_code: int, code: str, message: str) -> Response:
+    """Return an error as { code, message }, like lpdc-management-service."""
 
-
-def _error(status_code: int, code: str, detail: str) -> Response:
-    """Return one JSON:API error response."""
-
-    return _json_api(
-        status_code,
-        {
-            "errors": [
-                {
-                    "status": str(status_code),
-                    "code": code,
-                    "title": code.replace("_", " ").title(),
-                    "detail": detail,
-                }
-            ]
-        },
+    logger.warning("Rewrite error %s: %s", code, message)
+    return Response(
+        json.dumps({"code": code, "message": message}, ensure_ascii=False),
+        status=status_code,
+        mimetype="application/json",
     )
 
 
@@ -184,11 +172,19 @@ def create_rewrite() -> Response:
         if not original_text.strip():
             return _error(422, "empty_text", "original-text must not be empty")
         if len(original_text) > config.limits.max_input_length:
-            return _error(413, "input_too_large", "original-text exceeds the configured maximum length")
+            return _error(
+                413,
+                "input_too_large",
+                "De tekst is langer dan de maximale lengte",
+            )
 
         public_service_relationship = relationships.public_service.data
         if public_service_relationship is None:
-            return _error(422, "public_service_required", "public-service relationship is required")
+            return _error(
+                422,
+                "public_service_required",
+                "public-service relationship is required",
+            )
 
         def resource_uri(name: str) -> str | None:
             relationship = getattr(relationships, name).data
@@ -197,7 +193,10 @@ def create_rewrite() -> Response:
             # Both forms resolve through authorization, which is the only access check.
             identifier = relationship.id
             parsed_identifier = urlsplit(identifier)
-            if parsed_identifier.scheme in {"http", "https"} and parsed_identifier.netloc:
+            if (
+                parsed_identifier.scheme in {"http", "https"}
+                and parsed_identifier.netloc
+            ):
                 return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
             return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
 
@@ -208,8 +207,13 @@ def create_rewrite() -> Response:
             return _error(404, "public_service_not_found", "Public service not found")
         requested_generation = resource_uri("field_generation")
 
-        if relationships.field_generation.data is not None and requested_generation is None:
-            return _error(404, "field_generation_not_found", "Field generation not found")
+        if (
+            relationships.field_generation.data is not None
+            and requested_generation is None
+        ):
+            return _error(
+                404, "field_generation_not_found", "Field generation not found"
+            )
 
         # Reuse a requested generation, or create the generation for this field.
         if requested_generation:
@@ -222,7 +226,9 @@ def create_rewrite() -> Response:
         address_form = store.read_language_variant(public_service) or "nl-be-x-formal"
         attempt_number = store.next_attempt_number(field_generation_uri)
         if attempt_number > config.limits.max_attempts:
-            return _error(409, "attempt_limit_reached", "Maximum attempts reached for this field")
+            return _error(
+                409, "attempt_limit_reached", "Het maximum aantal pogingen voor dit veld is bereikt"
+            )
 
         # The prompt gets readable labels; provenance keeps the raw URI and variant.
         subject_types = store.read_subject_types(related_subject)
@@ -237,6 +243,9 @@ def create_rewrite() -> Response:
             job_uri=job_uri,
             operation=TASK_OPERATION["REWRITE"],
             agent_uri=agent_uri,
+            field_generation_uri=field_generation_uri,
+            attempt_number=attempt_number,
+            original_text=original_text,
         )
         task_uris = (activity_uri, job_uri)
 
@@ -260,9 +269,6 @@ def create_rewrite() -> Response:
                 store.write_generation_activity(
                     activity_uri=activity_uri,
                     job_uri=job_uri,
-                    field_generation_uri=field_generation_uri,
-                    attempt_number=attempt_number,
-                    original_text=original_text,
                     generated_text=result.generated_text,
                     started_at=started_at,
                     ended_at=ended_at,
@@ -280,10 +286,13 @@ def create_rewrite() -> Response:
 
         Thread(target=run_rewrite).start()
         return Response(
-            json.dumps({
-                "status": JOB_STATUS["SCHEDULED"],
-                "generation_activity_uri": activity_uri,
-            }),
+            json.dumps(
+                {
+                    "status": JOB_STATUS["SCHEDULED"],
+                    "id": activity_uuid,
+                    "generation_activity_uri": activity_uri,
+                }
+            ),
             status=202,
             mimetype="application/json",
         )

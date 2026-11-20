@@ -64,8 +64,6 @@ class PromptConfig(BaseModel):
         "Geef uitsluitend de herschreven tekst terug."
     )
     user_message: str = (
-        "Veld: {field}\nAanhefvorm: {address_form}\nRichtlijnen:\n{guidelines}\n\n"
-        "Tekst:\n{text}"
         "Veld: {field}\nAanhefvorm: {address_form}\n\n"
         "Tekst:\n{text}\n\n"
         "Herschrijf de tekst hierboven volgens de richtlijnen en schrijf "
