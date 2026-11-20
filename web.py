@@ -31,7 +31,6 @@ from src.agent_registry import (
 )
 from src.constants import (
     DATA_URI_BASE,
-    FIELD_GENERATION,
     INSTANCE_PUBLIC_SERVICE,
     JOB_URI_PREFIX,
     JOB_STATUS,
@@ -58,12 +57,6 @@ logger = logging.getLogger("hh-rewrite-service")
 bp = Blueprint("hh_rewrite", __name__)
 AGENT_URI = "http://lblod.data.gift/id/components/hh-rewrite/v1.0.0"
 
-JSON_API_MEDIA_TYPE = "application/vnd.api+json"
-
-RESOURCE_RDF_TYPES = {
-    "public_service": INSTANCE_PUBLIC_SERVICE,
-    "field_generation": FIELD_GENERATION,
-}
 
 def _startup() -> None:
     wait_for_triplestore()
@@ -88,7 +81,7 @@ def _error(status_code: int, code: str, message: str) -> Response:
 
 @bp.app_errorhandler(HTTPException)
 def _http_error(error: HTTPException) -> Response:
-    """Return Flask routing errors such as 404 and 405 as JSON:API errors."""
+    """Return Flask routing errors such as 404 and 405 as { code, message }."""
 
     code = (error.name or "http_error").lower().replace(" ", "_")
     return _error(error.code or 500, code, error.description or "")
@@ -143,23 +136,16 @@ def create_rewrite() -> Response:
         store = get_store()
         config = get_config()
         agent_uri = get_agent()
-        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != JSON_API_MEDIA_TYPE:
-            return _error(415, "unsupported_media_type", "Content-Type must be application/vnd.api+json")
 
         try:
             payload = RewriteRequest.model_validate(request.get_json(silent=True))
         except (ValueError, ValidationError):
             logger.debug("Invalid rewrite request")
-            return _error(400, "invalid_request", "Request body is not valid JSON:API")
+            return _error(400, "invalid_request", "Request body is invalid")
 
-        if payload.data.type != "generation-activities":
-            return _error(400, "invalid_request", "data.type must be generation-activities")
-
-        attributes = payload.data.attributes
-        relationships = payload.data.relationships
-        original_text = attributes.original_text
-        related_subject = attributes.related_subject
-        related_field = attributes.related_field
+        original_text = payload.original_text
+        related_subject = payload.related_subject
+        related_field = payload.related_field
 
         parsed_related_field = urlsplit(related_field)
         if parsed_related_field.scheme not in {"http", "https"} or not parsed_related_field.netloc:
@@ -178,50 +164,20 @@ def create_rewrite() -> Response:
                 "De tekst is langer dan de maximale lengte",
             )
 
-        public_service_relationship = relationships.public_service.data
-        if public_service_relationship is None:
-            return _error(
-                422,
-                "public_service_required",
-                "public-service relationship is required",
-            )
-
-        def resource_uri(name: str) -> str | None:
-            relationship = getattr(relationships, name).data
-            if relationship is None:
-                return None
-            # Both forms resolve through authorization, which is the only access check.
-            identifier = relationship.id
-            parsed_identifier = urlsplit(identifier)
-            if (
-                parsed_identifier.scheme in {"http", "https"}
-                and parsed_identifier.netloc
-            ):
-                return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
-            return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
-
-        guideline_text = config.rewrite.guidelines
-
-        public_service = resource_uri("public_service")
+        # Both forms resolve through authorization, which is the only access check.
+        public_service_id = payload.public_service_id
+        parsed_public_service_id = urlsplit(public_service_id)
+        if parsed_public_service_id.scheme in {"http", "https"} and parsed_public_service_id.netloc:
+            public_service = store.resolve_by_uri(public_service_id, INSTANCE_PUBLIC_SERVICE)
+        else:
+            public_service = store.resolve_by_uuid(public_service_id, INSTANCE_PUBLIC_SERVICE)
         if public_service is None:
             return _error(404, "public_service_not_found", "Public service not found")
-        requested_generation = resource_uri("field_generation")
 
-        if (
-            relationships.field_generation.data is not None
-            and requested_generation is None
-        ):
-            return _error(
-                404, "field_generation_not_found", "Field generation not found"
-            )
-
-        # Reuse a requested generation, or create the generation for this field.
-        if requested_generation:
-            field_generation_uri = requested_generation
-        else:
-            field_generation_uri = store.find_or_create_field_generation(
-                related_subject, related_field, public_service
-            )
+        guideline_text = config.rewrite.guidelines
+        field_generation_uri = store.find_or_create_field_generation(
+            related_subject, related_field, public_service
+        )
 
         address_form = store.read_language_variant(public_service) or "nl-be-x-formal"
         attempt_number = store.next_attempt_number(field_generation_uri)

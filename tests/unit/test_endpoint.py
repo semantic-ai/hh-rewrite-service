@@ -52,9 +52,8 @@ class FakeLlm:
 class FakeStore:
     """In-memory store double that records attempted persistence operations."""
 
-    def __init__(self, *, attempt_number=1, field_generation=None):
+    def __init__(self, *, attempt_number=1):
         self.attempt_number = attempt_number
-        self.field_generation = field_generation
         self.task = None
         self.execution_status = None
         self.writes = []
@@ -62,14 +61,12 @@ class FakeStore:
     def resolve_by_uuid(self, identifier, rdf_type):
         resources = {
             ("123", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"): PUBLIC_SERVICE,
-            ("1", "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"): FIELD_GENERATION,
         }
         return resources.get((identifier, rdf_type))
 
     def resolve_by_uri(self, uri, rdf_type):
         resources = {
             (PUBLIC_SERVICE, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"),
-            (FIELD_GENERATION, "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"),
         }
         return uri if (uri, rdf_type) in resources else None
 
@@ -106,24 +103,14 @@ class FakeStore:
 
 
 def request_payload(**overrides):
-    """Build a valid request payload with optional attribute overrides."""
+    """Build a valid request body with optional field overrides."""
 
-    attributes = {
-        "original-text": "De aanvrager dient het formulier in te vullen.",
-        "related-subject": RELATED_SUBJECT,
-        "related-field": "http://purl.org/dc/terms/title",
-    }
-    attributes.update(overrides.pop("attributes", {}))
-    relationships = {
-        "public-service": {"data": {"type": "public-services", "id": "123"}},
-    }
-    relationships.update(overrides.pop("relationships", {}))
     return {
-        "data": {
-            "type": "generation-activities",
-            "attributes": attributes,
-            "relationships": relationships,
-        }
+        "publicServiceId": "123",
+        "relatedSubject": RELATED_SUBJECT,
+        "relatedField": "http://purl.org/dc/terms/title",
+        "originalText": "De aanvrager dient het formulier in te vullen.",
+        **overrides,
     }
 
 
@@ -158,7 +145,6 @@ def test_post_rewrite_schedules_task_and_writes_generation_activity(configured_c
     response = client.post(
         "/hh-rewrites",
         json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     body = response.get_json()
@@ -233,16 +219,8 @@ def test_unauthorized_public_service_uri_returns_404_without_model_or_write(conf
     response = client.post(
         "/hh-rewrites",
         json=request_payload(
-            relationships={
-                "public-service": {
-                    "data": {
-                        "type": "public-services",
-                        "id": "http://data.lblod.info/id/public-services/other-organisation",
-                    }
-                }
-            }
+            publicServiceId="http://data.lblod.info/id/public-services/other-organisation"
         ),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     assert response.status_code == 404
@@ -252,31 +230,23 @@ def test_unauthorized_public_service_uri_returns_404_without_model_or_write(conf
 
 
 @pytest.mark.parametrize(
-    ("headers", "body", "status", "code"),
+    ("body", "status", "code"),
     [
-        ({}, request_payload(), 415, "unsupported_media_type"),
-        ({"content-type": "application/vnd.api+json"}, b"{", 400, "invalid_request"),
-        (
-            {"content-type": "application/vnd.api+json"},
-            request_payload(attributes={"original-text": "  "}),
-            422,
-            "empty_text",
-        ),
-        (
-            {"content-type": "application/vnd.api+json"},
-            request_payload(attributes={"related-field": "title"}),
-            400,
-            "invalid_related_field",
-        ),
+        (b"{", 400, "invalid_request"),
+        ({k: v for k, v in request_payload().items() if k != "publicServiceId"}, 400, "invalid_request"),
+        (request_payload(originalText="  "), 422, "empty_text"),
+        (request_payload(relatedField="title"), 400, "invalid_related_field"),
     ],
 )
-def test_post_rewrite_rejects_invalid_requests(configured_client, headers, body, status, code):
+def test_post_rewrite_rejects_invalid_requests(configured_client, body, status, code):
     """Return an error and create no task for invalid input."""
 
     client, _, store = configured_client
 
-    request_kwargs = {"json": body} if isinstance(body, dict) else {"data": body}
-    response = client.post("/hh-rewrites", headers=headers, **request_kwargs)
+    if isinstance(body, dict):
+        response = client.post("/hh-rewrites", json=body)
+    else:
+        response = client.post("/hh-rewrites", data=body, content_type="application/json")
 
     assert response.status_code == status
     assert response.get_json()["code"] == code
@@ -292,11 +262,8 @@ def test_post_rewrite_allows_comparison_operators(configured_client):
     response = client.post(
         "/hh-rewrites",
         json=request_payload(
-            attributes={
-                "original-text": "De aanvrager moet < 18 jaar zijn en > 1.000 euro betalen."
-            }
+            originalText="De aanvrager moet < 18 jaar zijn en > 1.000 euro betalen."
         ),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     assert response.status_code == 202
@@ -313,7 +280,6 @@ def test_post_rewrite_rejects_attempt_limit(configured_client):
     response = client.post(
         "/hh-rewrites",
         json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     assert response.status_code == 409
@@ -332,7 +298,6 @@ def test_model_failure_fails_task_without_writing_attempt(configured_client, mon
     response = client.post(
         "/hh-rewrites",
         json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     assert response.status_code == 202
