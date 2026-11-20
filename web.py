@@ -1,4 +1,4 @@
-"""HTTP boundary for synchronous HH rewrites.
+"""HTTP boundary for background HH rewrites.
 
 The mu-python-template owns application assembly and the request context. This
 module defines startup registration plus the rewrite service's router, request
@@ -7,15 +7,17 @@ mapping, dependency adapters and endpoint orchestration.
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from threading import Thread
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, copy_current_request_context, request
 from pydantic import ValidationError
 from werkzeug.exceptions import HTTPException
 
@@ -27,22 +29,21 @@ from src.agent_registry import (
     wait_for_triplestore,
     write_agent_info,
 )
-from src.constants import DATA_URI_BASE, FIELD_GENERATION, INSTANCE_PUBLIC_SERVICE, NOT_USED
+from src.constants import (
+    DATA_URI_BASE,
+    INSTANCE_PUBLIC_SERVICE,
+    JOB_URI_PREFIX,
+    JOB_STATUS,
+    TASK_OPERATION,
+)
 from src.config import get_config
 from src.rewrite import (
-    RewriteProviderError,
-    RewriteValidationError,
     address_form_label,
     field_label,
     make_llm,
     rewrite_text,
 )
-from src.schema import (
-    ActivityAttributes,
-    Resource,
-    RewriteRequest,
-    RewriteResponse,
-)
+from src.schema import RewriteRequest
 
 if TYPE_CHECKING:
     from src.store import Store
@@ -56,12 +57,6 @@ logger = logging.getLogger("hh-rewrite-service")
 bp = Blueprint("hh_rewrite", __name__)
 AGENT_URI = "http://lblod.data.gift/id/components/hh-rewrite/v1.0.0"
 
-JSON_API_MEDIA_TYPE = "application/vnd.api+json"
-
-RESOURCE_RDF_TYPES = {
-    "public_service": INSTANCE_PUBLIC_SERVICE,
-    "field_generation": FIELD_GENERATION,
-}
 
 def _startup() -> None:
     wait_for_triplestore()
@@ -73,38 +68,20 @@ def _startup() -> None:
         set_agent_uri(AGENT_URI)
 
 
-def _iso(value: datetime) -> str:
-    """Serialize a timestamp in the UTC format used by JSON:API responses."""
+def _error(status_code: int, code: str, message: str) -> Response:
+    """Return an error as { code, message }, like lpdc-management-service."""
 
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _json_api(status_code: int, content: dict[str, Any]) -> Response:
-    body = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
-    return Response(body, status=status_code, mimetype=JSON_API_MEDIA_TYPE)
-
-
-def _error(status_code: int, code: str, detail: str) -> Response:
-    """Return one JSON:API error response."""
-
-    return _json_api(
-        status_code,
-        {
-            "errors": [
-                {
-                    "status": str(status_code),
-                    "code": code,
-                    "title": code.replace("_", " ").title(),
-                    "detail": detail,
-                }
-            ]
-        },
+    logger.warning("Rewrite error %s: %s", code, message)
+    return Response(
+        json.dumps({"code": code, "message": message}, ensure_ascii=False),
+        status=status_code,
+        mimetype="application/json",
     )
 
 
 @bp.app_errorhandler(HTTPException)
 def _http_error(error: HTTPException) -> Response:
-    """Return Flask routing errors such as 404 and 405 as JSON:API errors."""
+    """Return Flask routing errors such as 404 and 405 as { code, message }."""
 
     code = (error.name or "http_error").lower().replace(" ", "_")
     return _error(error.code or 500, code, error.description or "")
@@ -143,31 +120,32 @@ def get_agent() -> str:
 
 
 @bp.post("/hh-rewrites")
-async def create_rewrite() -> Response:
-    """Run one rewrite, persist it and return the generated activity."""
+def create_rewrite() -> Response:
+    """Create a task and return its URI while the rewrite runs in the background."""
+
+    task_uris: tuple[str, str] | None = None
+
+    def fail_task(error: Exception) -> None:
+        if task_uris is not None:
+            try:
+                store.fail_rewrite_task(*task_uris, error)
+            except Exception:
+                logger.exception("Failed to persist failure for rewrite task %s", task_uris[0])
 
     try:
-        llm = get_llm()
         store = get_store()
         config = get_config()
         agent_uri = get_agent()
-        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != JSON_API_MEDIA_TYPE:
-            return _error(415, "unsupported_media_type", "Content-Type must be application/vnd.api+json")
 
         try:
             payload = RewriteRequest.model_validate(request.get_json(silent=True))
         except (ValueError, ValidationError):
             logger.debug("Invalid rewrite request")
-            return _error(400, "invalid_request", "Request body is not valid JSON:API")
+            return _error(400, "invalid_request", "Request body is invalid")
 
-        if payload.data.type != "generation-activities":
-            return _error(400, "invalid_request", "data.type must be generation-activities")
-
-        attributes = payload.data.attributes
-        relationships = payload.data.relationships
-        original_text = attributes.original_text
-        related_subject = attributes.related_subject
-        related_field = attributes.related_field
+        original_text = payload.original_text
+        related_subject = payload.related_subject
+        related_field = payload.related_field
 
         parsed_related_field = urlsplit(related_field)
         if parsed_related_field.scheme not in {"http", "https"} or not parsed_related_field.netloc:
@@ -180,117 +158,103 @@ async def create_rewrite() -> Response:
         if not original_text.strip():
             return _error(422, "empty_text", "original-text must not be empty")
         if len(original_text) > config.limits.max_input_length:
-            return _error(413, "input_too_large", "original-text exceeds the configured maximum length")
+            return _error(
+                413,
+                "input_too_large",
+                "De tekst is langer dan de maximale lengte",
+            )
 
-        public_service_relationship = relationships.public_service.data
-        if public_service_relationship is None:
-            return _error(422, "public_service_required", "public-service relationship is required")
-
-        def resource_uri(name: str) -> str | None:
-            relationship = getattr(relationships, name).data
-            if relationship is None:
-                return None
-            # Both forms resolve through authorization, which is the only access check.
-            identifier = relationship.id
-            parsed_identifier = urlsplit(identifier)
-            if parsed_identifier.scheme in {"http", "https"} and parsed_identifier.netloc:
-                return store.resolve_by_uri(identifier, RESOURCE_RDF_TYPES[name])
-            return store.resolve_by_uuid(identifier, RESOURCE_RDF_TYPES[name])
-
-        guideline_text = config.rewrite.guidelines
-
-        public_service = resource_uri("public_service")
+        # Both forms resolve through authorization, which is the only access check.
+        public_service_id = payload.public_service_id
+        parsed_public_service_id = urlsplit(public_service_id)
+        if parsed_public_service_id.scheme in {"http", "https"} and parsed_public_service_id.netloc:
+            public_service = store.resolve_by_uri(public_service_id, INSTANCE_PUBLIC_SERVICE)
+        else:
+            public_service = store.resolve_by_uuid(public_service_id, INSTANCE_PUBLIC_SERVICE)
         if public_service is None:
             return _error(404, "public_service_not_found", "Public service not found")
-        requested_generation = resource_uri("field_generation")
 
-        if relationships.field_generation.data is not None and requested_generation is None:
-            return _error(404, "field_generation_not_found", "Field generation not found")
-
-        # Reuse a requested generation, or create the generation for this field.
-        if requested_generation:
-            field_generation_uri = requested_generation
-        else:
-            field_generation_uri = store.find_or_create_field_generation(
-                related_subject, related_field, public_service
-            )
+        guideline_text = config.rewrite.guidelines
+        field_generation_uri = store.find_or_create_field_generation(
+            related_subject, related_field, public_service
+        )
 
         address_form = store.read_language_variant(public_service) or "nl-be-x-formal"
         attempt_number = store.next_attempt_number(field_generation_uri)
         if attempt_number > config.limits.max_attempts:
-            return _error(409, "attempt_limit_reached", "Maximum attempts reached for this field")
+            return _error(
+                409, "attempt_limit_reached", "Het maximum aantal pogingen voor dit veld is bereikt"
+            )
 
         # The prompt gets readable labels; provenance keeps the raw URI and variant.
         subject_types = store.read_subject_types(related_subject)
         prompt_field = field_label(config, subject_types, related_field)
         prompt_address_form = address_form_label(config, address_form)
 
-        # Only the model invocation is provider-dependent; persistence remains deterministic.
-        started_at = datetime.now(timezone.utc)
-        result, usage = await rewrite_text(
-            config,
-            llm,
-            field=prompt_field,
-            address_form=prompt_address_form,
-            guideline_text=guideline_text,
-            text=original_text,
-        )
-        ended_at = datetime.now(timezone.utc)
-
-        # Store the generated text and provenance as one domain operation.
         activity_uuid = str(uuid.uuid4())
         activity_uri = f"{DATA_URI_BASE}generation-activities/{activity_uuid}"
-
-        store.write_generation_activity(
+        job_uri = f"{JOB_URI_PREFIX}{uuid.uuid4()}"
+        store.create_task(
             activity_uri=activity_uri,
+            job_uri=job_uri,
+            operation=TASK_OPERATION["REWRITE"],
+            agent_uri=agent_uri,
             field_generation_uri=field_generation_uri,
             attempt_number=attempt_number,
             original_text=original_text,
-            generated_text=result.generated_text,
-            started_at=started_at,
-            ended_at=ended_at,
-            address_form=address_form,
-            agent_uri=agent_uri,
-            model_uri=model_name_to_uri(config.llm.model_name),
-            endpoint=config.llm.base_url or config.llm.provider,
-            tokens_in=usage.tokens_in,
-            tokens_out=usage.tokens_out,
-            duration=usage.duration,
         )
+        task_uris = (activity_uri, job_uri)
 
-        response = RewriteResponse(
-            data=Resource(
-                type="generation-activities",
-                id=activity_uuid,
-                attributes=ActivityAttributes(
-                    uri=activity_uri,
-                    **{
-                        "attempt-number": attempt_number,
-                        "original-text": original_text,
-                        "generated-text": result.generated_text,
-                        "started-at": _iso(started_at),
-                        "ended-at": _iso(ended_at),
-                        "model": config.llm.model_name,
-                        "address-form": address_form,
-                        "language": "nl",
-                        "status": NOT_USED,
-                    },
-                ).model_dump(by_alias=True),
-                relationships={
-                    "field-generation": {"data": {"type": "field-generations", "id": field_generation_uri}},
-                    "agent": {
-                        "data": {"type": "agents", "id": agent_uri}
-                    },
-                },
+        @copy_current_request_context
+        def run_rewrite() -> None:
+            try:
+                started_at = datetime.now(timezone.utc)
+                store.start_rewrite_task(activity_uri, job_uri, started_at)
+                result, usage = asyncio.run(
+                    rewrite_text(
+                        config,
+                        get_llm(),
+                        field=prompt_field,
+                        address_form=prompt_address_form,
+                        guideline_text=guideline_text,
+                        text=original_text,
+                    )
+                )
+                ended_at = datetime.now(timezone.utc)
+
+                store.write_generation_activity(
+                    activity_uri=activity_uri,
+                    job_uri=job_uri,
+                    generated_text=result.generated_text,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    address_form=address_form,
+                    agent_uri=agent_uri,
+                    model_uri=model_name_to_uri(config.llm.model_name),
+                    endpoint=config.llm.base_url or config.llm.provider,
+                    tokens_in=usage.tokens_in,
+                    tokens_out=usage.tokens_out,
+                    duration=usage.duration,
+                )
+            except Exception as error:
+                logger.exception("Rewrite task %s failed", activity_uri)
+                fail_task(error)
+
+        Thread(target=run_rewrite).start()
+        return Response(
+            json.dumps(
+                {
+                    "status": JOB_STATUS["SCHEDULED"],
+                    "id": activity_uuid,
+                    "generation_activity_uri": activity_uri,
+                }
             ),
-            included=[],
+            status=202,
+            mimetype="application/json",
         )
-        return _json_api(201, response.model_dump())
-    except (RewriteProviderError, RewriteValidationError):
-        logger.exception("Rewrite model call failed")
-        return _error(504, "model_provider_error", "The rewrite model could not produce a response")
-    except Exception:
+    except Exception as error:
         logger.exception("Rewrite request failed")
+        fail_task(error)
         return _error(500, "rewrite_failed", "The rewrite request failed")
 
 
@@ -300,4 +264,3 @@ async def create_rewrite() -> Response:
 if hasattr(builtins, "app"):
     builtins.app.register_blueprint(bp)
     _startup()
-

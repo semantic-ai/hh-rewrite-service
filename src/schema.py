@@ -1,108 +1,20 @@
-"""JSON:API request and response models for HH rewrite activities.
+"""Request model for HH rewrites.
 
-Python field names use snake_case, while aliases preserve the hyphenated
-JSON:API attribute and relationship names used by the public contract.
+Python field names use snake_case, while aliases match the camelCase JSON body
+sent by the frontend, like the lpdc-management-service endpoints.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
-
-
-class ResourceIdentifier(BaseModel):
-    """JSON:API identifier used inside a relationship."""
-
-    type: str
-    id: str
-
-
-class Relationship(BaseModel):
-    """Optional JSON:API relationship data."""
-
-    data: ResourceIdentifier | None = None
-
-
-class RewriteAttributes(BaseModel):
-    """Input attributes required to request a rewrite."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    original_text: str = Field(alias="original-text")
-    related_subject: str = Field(alias="related-subject")
-    related_field: str = Field(alias="related-field")
-
-
-class RewriteRelationships(BaseModel):
-    """Relationships accepted by the rewrite request."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    public_service: Relationship = Field(
-        default_factory=Relationship, alias="public-service"
-    )
-    field_generation: Relationship = Field(
-        default_factory=Relationship, alias="field-generation"
-    )
-    guideline: Relationship = Field(default_factory=Relationship, alias="guideline")
-
-
-class RewriteRequestData(BaseModel):
-    """JSON:API request resource containing rewrite data."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    type: str
-    attributes: RewriteAttributes
-    relationships: RewriteRelationships = Field(default_factory=RewriteRelationships)
-
-
 class RewriteRequest(BaseModel):
-    """Top-level JSON:API rewrite request document."""
-
-    data: RewriteRequestData
-
-
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
-
-
-class ActivityAttributes(BaseModel):
-    """Generation activity attributes returned after a completed rewrite."""
+    """Plain JSON body of a rewrite request."""
 
     model_config = ConfigDict(populate_by_name=True)
 
-    uri: str
-    attempt_number: int = Field(alias="attempt-number")
-    original_text: str = Field(alias="original-text")
-    generated_text: str = Field(alias="generated-text")
-    
-    started_at: str = Field(alias="started-at")
-    ended_at: str = Field(alias="ended-at")
-    address_form: str = Field(alias="address-form")
-    model: str
-    language: str
-    status: str
-
-
-class Resource(BaseModel):
-    """Generic JSON:API resource used for primary and included data."""
-
-    type: str
-    id: str
-    attributes: dict[str, Any]
-    relationships: dict[str, Any]
-
-
-class RewriteResponse(BaseModel):
-    """Top-level response containing an attempt and its provenance task."""
-
-    data: Resource
-    included: list[Resource]
+    public_service_id: str = Field(alias="publicServiceId")
+    related_subject: str = Field(alias="relatedSubject")
+    related_field: str = Field(alias="relatedField")
+    original_text: str = Field(alias="originalText")

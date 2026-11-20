@@ -1,13 +1,15 @@
-"""Tests for the JSON:API rewrite endpoint."""
+"""Tests for the background rewrite endpoint."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 from flask import Flask
 
 import src.agent_registry as registry
 import web
-from src.constants import NOT_USED
+from src.constants import JOB_STATUS
 from src.config import ServiceConfig
 from web import bp, get_agent, get_config, get_llm, get_store
 
@@ -50,22 +52,21 @@ class FakeLlm:
 class FakeStore:
     """In-memory store double that records attempted persistence operations."""
 
-    def __init__(self, *, attempt_number=1, field_generation=None):
+    def __init__(self, *, attempt_number=1):
         self.attempt_number = attempt_number
-        self.field_generation = field_generation
+        self.task = None
+        self.execution_status = None
         self.writes = []
 
     def resolve_by_uuid(self, identifier, rdf_type):
         resources = {
             ("123", "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"): PUBLIC_SERVICE,
-            ("1", "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"): FIELD_GENERATION,
         }
         return resources.get((identifier, rdf_type))
 
     def resolve_by_uri(self, uri, rdf_type):
         resources = {
             (PUBLIC_SERVICE, "https://productencatalogus.data.vlaanderen.be/ns/ipdc-lpdc#InstancePublicService"),
-            (FIELD_GENERATION, "http://data.lblod.info/vocabularies/lpdc/FieldGeneration"),
         }
         return uri if (uri, rdf_type) in resources else None
 
@@ -81,8 +82,20 @@ class FakeStore:
     def next_attempt_number(self, field_generation_uri):
         return self.attempt_number
 
+    def create_task(self, **values):
+        self.task = values
+        self.execution_status = "scheduled"
+
+    def start_rewrite_task(self, activity_uri, job_uri, started_at):
+        self.execution_status = "busy"
+
+    def fail_rewrite_task(self, activity_uri, job_uri, error):
+        self.execution_status = "failed"
+
     def write_generation_activity(self, **values):
         self.writes.append(values)
+        self.execution_status = "success"
+
 
 # ---------------------------------------------------------------------------
 # Fixtures and request construction
@@ -90,24 +103,14 @@ class FakeStore:
 
 
 def request_payload(**overrides):
-    """Build a valid request payload with optional attribute overrides."""
+    """Build a valid request body with optional field overrides."""
 
-    attributes = {
-        "original-text": "De aanvrager dient het formulier in te vullen.",
-        "related-subject": RELATED_SUBJECT,
-        "related-field": "http://purl.org/dc/terms/title",
-    }
-    attributes.update(overrides.pop("attributes", {}))
-    relationships = {
-        "public-service": {"data": {"type": "public-services", "id": "123"}},
-    }
-    relationships.update(overrides.pop("relationships", {}))
     return {
-        "data": {
-            "type": "generation-activities",
-            "attributes": attributes,
-            "relationships": relationships,
-        }
+        "publicServiceId": "123",
+        "relatedSubject": RELATED_SUBJECT,
+        "relatedField": "http://purl.org/dc/terms/title",
+        "originalText": "De aanvrager dient het formulier in te vullen.",
+        **overrides,
     }
 
 
@@ -123,6 +126,8 @@ def configured_client(monkeypatch):
     monkeypatch.setattr(web, "get_llm", lambda: llm)
     monkeypatch.setattr(web, "get_store", lambda: store)
     monkeypatch.setattr(web, "get_agent", lambda: "http://example.org/agent/1")
+    # Run the background rewrite inline so tests can assert on its outcome.
+    monkeypatch.setattr(web, "Thread", lambda target: SimpleNamespace(start=target))
     with service_app.test_client() as client:
         yield client, llm, store
 
@@ -132,51 +137,40 @@ def configured_client(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_post_rewrite_returns_generation_activity(configured_client):
-    """Return the completed generation activity."""
+def test_post_rewrite_schedules_task_and_writes_generation_activity(configured_client):
+    """Accept the request, link the scheduled attempt and write the rewrite in the background."""
 
     client, llm, store = configured_client
 
     response = client.post(
         "/hh-rewrites",
         json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     body = response.get_json()
-    assert response.status_code == 201
-    assert response.headers["content-type"].startswith("application/vnd.api+json")
-    assert body["data"]["type"] == "generation-activities"
-    assert body["data"]["attributes"]["generated-text"] == "Vul het formulier in."
-    assert body["data"]["attributes"]["status"] == NOT_USED
-    assert body["data"]["relationships"]["field-generation"]["data"]["type"] == "field-generations"
-    assert body["included"] == []
+    assert response.status_code == 202
+    assert response.headers["content-type"].startswith("application/json")
+    assert body["status"] == JOB_STATUS["SCHEDULED"]
+    assert body["generation_activity_uri"].endswith(f"/generation-activities/{body['id']}")
+
+    # The attempt is linked to its field generation as soon as the task is created.
+    assert store.task["activity_uri"] == body["generation_activity_uri"]
+    assert store.task["field_generation_uri"] == FIELD_GENERATION
+    assert store.task["attempt_number"] == 1
+    assert store.task["original_text"] == "De aanvrager dient het formulier in te vullen."
+
+    assert store.execution_status == "success"
     assert len(store.writes) == 1
     assert llm.calls == 1
+    assert store.writes[0]["activity_uri"] == body["generation_activity_uri"]
+    assert store.writes[0]["generated_text"] == "Vul het formulier in."
     assert store.writes[0]["model_uri"].endswith("#gpt-6-luna")
     assert store.writes[0]["endpoint"] == "openai"
-    assert "Gebruik actieve zinnen." in llm.messages[0][1]["content"]
+    assert store.writes[0]["address_form"] == "nl-be-x-formal"
+    assert "Gebruik actieve zinnen." in llm.messages[0][0]["content"]
     assert "Veld: Producttitel" in llm.messages[0][1]["content"]
     assert "Aanhefvorm: u-vorm" in llm.messages[0][1]["content"]
-    assert store.writes[0]["address_form"] == "nl-be-x-formal"
 
-
-def test_post_rewrite_preserves_non_ascii_generated_text(configured_client):
-    """Keep generated Unicode characters readable in the JSON:API body."""
-
-    client, llm, _ = configured_client
-    llm.response = {"generated_text": "Gebruik één duidelijke zin."}
-
-    response = client.post(
-        "/hh-rewrites",
-        json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
-    )
-
-    assert response.status_code == 201
-    body = response.get_data(as_text=True)
-    assert "é" in body
-    assert "\\u00e9" not in body
 
 @pytest.mark.parametrize(
     ("method", "path", "status", "code"),
@@ -185,16 +179,17 @@ def test_post_rewrite_preserves_non_ascii_generated_text(configured_client):
         ("post", "/unknown", 404, "not_found"),
     ],
 )
-def test_routing_errors_return_json_api(configured_client, method, path, status, code):
-    """Return Flask routing errors in the same JSON:API shape as endpoint errors."""
+def test_routing_errors_return_json_error(configured_client, method, path, status, code):
+    """Return Flask routing errors in the same { code, message } shape as endpoint errors."""
 
     client, _, _ = configured_client
 
     response = getattr(client, method)(path)
 
     assert response.status_code == status
-    assert response.headers["content-type"].startswith("application/vnd.api+json")
-    assert response.get_json()["errors"][0]["code"] == code
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.get_json()["code"] == code
+    assert "message" in response.get_json()
 
 
 @pytest.mark.parametrize(
@@ -224,59 +219,38 @@ def test_unauthorized_public_service_uri_returns_404_without_model_or_write(conf
     response = client.post(
         "/hh-rewrites",
         json=request_payload(
-            relationships={
-                "public-service": {
-                    "data": {
-                        "type": "public-services",
-                        "id": "http://data.lblod.info/id/public-services/other-organisation",
-                    }
-                }
-            }
+            publicServiceId="http://data.lblod.info/id/public-services/other-organisation"
         ),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     assert response.status_code == 404
-    assert response.get_json()["errors"][0]["code"] == "public_service_not_found"
+    assert response.get_json()["code"] == "public_service_not_found"
     assert llm.calls == 0
     assert not store.writes
 
 
 @pytest.mark.parametrize(
-    ("headers", "body", "status", "code"),
+    ("body", "status", "code"),
     [
-        ({}, request_payload(), 415, "unsupported_media_type"),
-        ({"content-type": "application/vnd.api+json"}, b"{", 400, "invalid_request"),
-        (
-            {"content-type": "application/vnd.api+json"},
-            request_payload(attributes={"original-text": "  "}),
-            422,
-            "empty_text",
-        ),
-        (
-            {"content-type": "application/vnd.api+json"},
-            request_payload(attributes={"original-text": "<p>Vul het formulier in.</p>"}),
-            422,
-            "markup_not_allowed",
-        ),
-        (
-            {"content-type": "application/vnd.api+json"},
-            request_payload(attributes={"related-field": "title"}),
-            400,
-            "invalid_related_field",
-        ),
+        (b"{", 400, "invalid_request"),
+        ({k: v for k, v in request_payload().items() if k != "publicServiceId"}, 400, "invalid_request"),
+        (request_payload(originalText="  "), 422, "empty_text"),
+        (request_payload(relatedField="title"), 400, "invalid_related_field"),
     ],
 )
-def test_post_rewrite_rejects_invalid_requests(configured_client, headers, body, status, code):
-    """Return a JSON:API error and avoid persistence for invalid input."""
+def test_post_rewrite_rejects_invalid_requests(configured_client, body, status, code):
+    """Return an error and create no task for invalid input."""
 
     client, _, store = configured_client
 
-    request_kwargs = {"json": body} if isinstance(body, dict) else {"data": body}
-    response = client.post("/hh-rewrites", headers=headers, **request_kwargs)
+    if isinstance(body, dict):
+        response = client.post("/hh-rewrites", json=body)
+    else:
+        response = client.post("/hh-rewrites", data=body, content_type="application/json")
 
     assert response.status_code == status
-    assert response.get_json()["errors"][0]["code"] == code
+    assert response.get_json()["code"] == code
+    assert store.task is None
     assert not store.writes
 
 
@@ -288,14 +262,11 @@ def test_post_rewrite_allows_comparison_operators(configured_client):
     response = client.post(
         "/hh-rewrites",
         json=request_payload(
-            attributes={
-                "original-text": "De aanvrager moet < 18 jaar zijn en > 1.000 euro betalen."
-            }
+            originalText="De aanvrager moet < 18 jaar zijn en > 1.000 euro betalen."
         ),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert llm.calls == 1
     assert len(store.writes) == 1
 
@@ -309,16 +280,17 @@ def test_post_rewrite_rejects_attempt_limit(configured_client):
     response = client.post(
         "/hh-rewrites",
         json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
     assert response.status_code == 409
-    assert response.get_json()["errors"][0]["code"] == "attempt_limit_reached"
+    assert response.get_json()["code"] == "attempt_limit_reached"
+    assert response.get_json()["message"]
+    assert store.task is None
     assert not store.writes
 
 
-def test_model_failure_does_not_write_attempt(configured_client, monkeypatch):
-    """Map provider failure to a gateway error without writing an attempt."""
+def test_model_failure_fails_task_without_writing_attempt(configured_client, monkeypatch):
+    """Accept the request, then fail the task when the model provider is unavailable."""
 
     client, _, store = configured_client
     monkeypatch.setattr(web, "get_llm", lambda: FakeLlm(error=ConnectionError("offline")))
@@ -326,11 +298,11 @@ def test_model_failure_does_not_write_attempt(configured_client, monkeypatch):
     response = client.post(
         "/hh-rewrites",
         json=request_payload(),
-        headers={"content-type": "application/vnd.api+json"},
     )
 
-    assert response.status_code == 504
-    assert response.get_json()["errors"][0]["code"] == "model_provider_error"
+    assert response.status_code == 202
+    assert store.task is not None
+    assert store.execution_status == "failed"
     assert not store.writes
 
 
